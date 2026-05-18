@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: snap-trade-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: snap_trade
+      TZ: Asia/Seoul
+    ports:
+      - "3306:3306"
+    volumes:
+      - snap-trade-mysql-data:/var/lib/mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    networks:
+      - snap-trade-network
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: snap-trade-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - snap-trade-redis-data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - snap-trade-network
+
+volumes:
+  snap-trade-mysql-data:
+  snap-trade-redis-data:
+
+networks:
+  snap-trade-network:
+    driver: bridge
