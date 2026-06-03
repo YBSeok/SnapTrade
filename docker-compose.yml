@@ -9,7 +9,7 @@ services:
       MYSQL_DATABASE: snap_trade
       TZ: Asia/Seoul
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     volumes:
       - snap-trade-mysql-data:/var/lib/mysql
     command:

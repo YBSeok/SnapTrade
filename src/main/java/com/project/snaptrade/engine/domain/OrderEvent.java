@@ -16,7 +16,7 @@ import java.time.LocalDateTime;
 @Table(name = "order_events")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-class OrderEvent {
+public class OrderEvent {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
