@@ -21,7 +21,6 @@ import java.time.LocalDateTime;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Order {
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @Column(name = "user_id", nullable = false) private Long userId;
@@ -33,19 +32,19 @@ public class Order {
     @Enumerated(EnumType.STRING)
     @Column(name = "order_type", length = 20, nullable = false) private OrderType orderType;
 
-    @Column(precision = 36, scale = 18, nullable = false) private BigDecimal price;
+    @Column(nullable = false) private long price;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "time_in_force", length = 20, nullable = false) private TimeInForce timeInForce;
 
-    @Column(name = "orig_qty", precision = 36, scale = 18, nullable = false)
-    private BigDecimal origQty;
+    @Column(name = "orig_qty", nullable = false)
+    private long origQty;
 
-    @Column(name = "excuted_qty", precision = 36, scale = 18, nullable = false)
-    private BigDecimal executedQty = BigDecimal.ZERO;
+    @Column(name = "executed_qty", nullable = false)
+    private long executedQty = 0L;
 
-    @Column(name = "cumulative_quote_qty", precision = 36, scale = 18, nullable = false)
-    private BigDecimal cumulativeQuoteQty = BigDecimal.ZERO;
+    @Column(name = "cumulative_quote_qty", nullable = false)
+    private long cumulativeQuoteQty = 0L;
 
     @Enumerated(EnumType.STRING)
     @Column(length = 20, nullable = false) private OrderStatus status = OrderStatus.NEW;
@@ -58,7 +57,8 @@ public class Order {
     @Column(name = "updated_at") private LocalDateTime updatedAt;
 
     @Builder
-    public Order(Long userId, Long marketId, OrderSide side, OrderType orderType, BigDecimal price, TimeInForce timeInForce, BigDecimal origQty) {
+    public Order(Long id, Long userId, Long marketId, OrderSide side, OrderType orderType, long price, TimeInForce timeInForce, long origQty) {
+        this.id = id;
         this.userId = userId;
         this.marketId = marketId;
         this.side = side;
@@ -68,13 +68,36 @@ public class Order {
         this.origQty = origQty;
     }
 
-    public BigDecimal getRemainingQty() {
-        return this.origQty.subtract(this.executedQty);
+    public long getRemainingQty() {
+        return this.origQty - this.executedQty;
     }
 
-    public void fill(BigDecimal fillQty, BigDecimal fillPrice) {
-        this.executedQty = this.executedQty.add(fillQty);
-        this.cumulativeQuoteQty = this.cumulativeQuoteQty.add(fillQty.multiply(fillPrice));
-        this.status = this.executedQty.compareTo(this.origQty) >= 0 ? OrderStatus.FILLED : OrderStatus.PARTIALLY_FILLED;
+    public void fill(long fillQty, long fillPrice) {
+        this.executedQty += fillQty;
+        this.cumulativeQuoteQty += (fillQty * fillPrice);
+        this.status = this.executedQty >= this.origQty ? OrderStatus.FILLED : OrderStatus.PARTIALLY_FILLED;
+    }
+
+    public void assignSequenceNo(Long sequenceNo) {
+        this.sequenceNo = sequenceNo;
+    }
+
+    public static Order reconstructForReplay(Long id, Long userId, Long marketId, OrderSide side, long price, long origQty) {
+        Order order = new Order();
+        order.id = id;
+        order.userId = userId;
+        order.marketId = marketId;
+        order.side = side;
+        order.price = price;
+        order.origQty = origQty;
+
+        order.executedQty = 0L;
+        order.cumulativeQuoteQty = 0L;
+        order.status = OrderStatus.NEW;
+
+        order.orderType = OrderType.LIMIT;
+        order.timeInForce = TimeInForce.GTC;
+
+        return order;
     }
 }

@@ -9,7 +9,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -18,11 +17,10 @@ import java.time.LocalDateTime;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class OrderEvent {
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    private long id;
 
     @Column(name = "order_id", nullable = false) private Long orderId;
-    @Column(name = "trade_id") private Long tradeId; // 단순 주문 생성/취소일 경우 null 허용
+    @Column(name = "trade_id") private Long tradeId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "event_type", length = 30, nullable = false) private EventType eventType;
@@ -33,8 +31,11 @@ public class OrderEvent {
     @Enumerated(EnumType.STRING)
     @Column(name = "status_after", length = 20) private OrderStatus statusAfter;
 
-    @Column(name = "fill_qty", precision = 36, scale = 18) private BigDecimal fillQty;
-    @Column(name = "fill_price", precision = 36, scale = 18) private BigDecimal fillPrice;
+    @Column(name = "fill_qty", nullable = false)
+    private long fillQty = 0L;
+
+    @Column(name = "fill_price", nullable = false)
+    private long fillPrice = 0L;
 
     @Column(columnDefinition = "TEXT") private String payload; // JSON 직렬화 데이터 보관용
 
@@ -42,7 +43,8 @@ public class OrderEvent {
     @Column(name = "occured_at", updatable = false) private LocalDateTime occurredAt;
 
     @Builder
-    public OrderEvent(Long orderId, Long tradeId, EventType eventType, OrderStatus statusBefore, OrderStatus statusAfter, BigDecimal fillQty, BigDecimal fillPrice, String payload) {
+    public OrderEvent(long id, long orderId, Long tradeId, EventType eventType, OrderStatus statusBefore, OrderStatus statusAfter, long fillQty, long fillPrice, String payload) {
+        this.id = id;
         this.orderId = orderId;
         this.tradeId = tradeId;
         this.eventType = eventType;

@@ -1,6 +1,8 @@
 package com.project.snaptrade.engine.repository;
 
 import com.project.snaptrade.engine.domain.*;
+import com.project.snaptrade.engine.domain.constant.EventType;
+import com.project.snaptrade.engine.domain.constant.OrderStatus;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,42 +17,12 @@ import java.util.List;
 @Slf4j
 @Repository
 @RequiredArgsConstructor
-public class ExecutionRepository {
+public class EventExecutionRepository {
 
     private final JdbcTemplate jdbcTemplate;
 
     @Transactional
-    public void saveExecutions(List<Trade> trades, List<Order> orders, List<OrderEvent> events) {
-
-        if (!orders.isEmpty()) {
-            jdbcTemplate.batchUpdate(
-                    "INSERT INTO orders (id, user_id, market_id, side, order_type, time_in_force, price, orig_qty, executed_qty, cumulative_quote_qty, status, sequence_no, created_at, updated_at) " +
-                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW()) " +
-                            "ON DUPLICATE KEY UPDATE " +
-                            "executed_qty = VALUES(executed_qty), " +
-                            "cumulative_quote_qty = VALUES(cumulative_quote_qty), " +
-                            "status = VALUES(status), " +
-                            "updated_at = NOW()",
-                    new BatchPreparedStatementSetter() {
-                        public void setValues(PreparedStatement ps, int i) throws SQLException {
-                            Order o = orders.get(i);
-                            ps.setLong(1, o.getId());
-                            ps.setLong(2, o.getUserId());
-                            ps.setLong(3, o.getMarketId());
-                            ps.setString(4, o.getSide().name());
-                            ps.setString(5, o.getOrderType().name());
-                            ps.setString(6, o.getTimeInForce().name());
-                            ps.setLong(7, o.getPrice());
-                            ps.setLong(8, o.getOrigQty());
-                            ps.setLong(9, o.getExecutedQty());
-                            ps.setLong(10, o.getCumulativeQuoteQty());
-                            ps.setString(11, o.getStatus().name());
-                            ps.setObject(12, o.getSequenceNo());
-                        }
-                        public int getBatchSize() { return orders.size(); }
-                    });
-        }
-
+    public void appendEvents(List<Trade> trades, List<OrderEvent> events) {
         if (!trades.isEmpty()) {
             jdbcTemplate.batchUpdate(
                     "INSERT INTO trades (id, market_id, maker_order_id, taker_order_id, buyer_id, seller_id, price, quantity, quote_quantity, maker_fee, taker_fee, sequence_no, traded_at) " +
@@ -94,5 +66,54 @@ public class ExecutionRepository {
                         public int getBatchSize() { return events.size(); }
                     });
         }
+    }
+
+    @Transactional
+    public void updateReadModels(List<Order> orders) {
+        if (!orders.isEmpty()) {
+            jdbcTemplate.batchUpdate(
+                    "INSERT INTO orders (id, user_id, market_id, side, order_type, time_in_force, price, orig_qty, executed_qty, cumulative_quote_qty, status, sequence_no, created_at, updated_at) " +
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW()) " +
+                            "ON DUPLICATE KEY UPDATE " +
+                            "executed_qty = VALUES(executed_qty), " +
+                            "cumulative_quote_qty = VALUES(cumulative_quote_qty), " +
+                            "status = VALUES(status), " +
+                            "updated_at = NOW()",
+                    new BatchPreparedStatementSetter() {
+                        public void setValues(PreparedStatement ps, int i) throws SQLException {
+                            Order o = orders.get(i);
+                            ps.setLong(1, o.getId());
+                            ps.setLong(2, o.getUserId());
+                            ps.setLong(3, o.getMarketId());
+                            ps.setString(4, o.getSide().name());
+                            ps.setString(5, o.getOrderType().name());
+                            ps.setString(6, o.getTimeInForce().name());
+                            ps.setLong(7, o.getPrice());
+                            ps.setLong(8, o.getOrigQty());
+                            ps.setLong(9, o.getExecutedQty());
+                            ps.setLong(10, o.getCumulativeQuoteQty());
+                            ps.setString(11, o.getStatus().name());
+                            ps.setObject(12, o.getSequenceNo());
+                        }
+                        public int getBatchSize() { return orders.size(); }
+                    });
+        }
+    }
+
+    public List<OrderEvent> findAllEventsOrderByIdAsc() {
+        String sql = "SELECT id, order_id, trade_id, event_type, status_before, status_after, fill_qty, fill_price, payload " +
+                "FROM order_events ORDER BY id ASC";
+
+        return jdbcTemplate.query(sql, (rs, rowNum) -> OrderEvent.builder()
+                .id(rs.getLong("id"))
+                .orderId(rs.getLong("order_id"))
+                .tradeId(rs.getObject("trade_id") != null ? rs.getLong("trade_id") : null)
+                .eventType(EventType.valueOf(rs.getString("event_type")))
+                .statusBefore(rs.getString("status_before") != null ? OrderStatus.valueOf(rs.getString("status_before")) : null)
+                .statusAfter(rs.getString("status_after") != null ? OrderStatus.valueOf(rs.getString("status_after")) : null)
+                .fillQty(rs.getLong("fill_qty"))
+                .fillPrice(rs.getLong("fill_price"))
+                .payload(rs.getString("payload"))
+                .build());
     }
 }
