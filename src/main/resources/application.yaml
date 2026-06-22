@@ -6,10 +6,16 @@ spring:
   application:
     name: snaptrade
 
+  sql:
+    init:
+      mode: always
+
   datasource:
     url: jdbc:mysql://localhost:3306/snap_trade?serverTimezone=Asia/Seoul
     username: root
     password: root
+    hikari:
+      pool-name: SnapTradeHikariPool
 
   data:
     redis:
@@ -19,3 +25,24 @@ spring:
   jpa:
     hibernate:
       ddl-auto: create
+
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 1000
+        order_inserts: true
+        order_updates: true
+
+    defer-datasource-initialization: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus, metrics
+  endpoint:
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      application: snaptrade-engine

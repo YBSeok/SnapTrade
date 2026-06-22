@@ -14,6 +14,6 @@ public class OrderRequestDto {
     private OrderSide side;
     private OrderType orderType;
     private TimeInForce timeInForce;
-    private BigDecimal price;
-    private BigDecimal quantity;
+    private Long price;
+    private Long quantity;
 }

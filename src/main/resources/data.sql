@@ -1,0 +1,2 @@
+INSERT INTO markets (id, symbol, min_notional, status, base_asset, quote_asset, min_price, tick_size, min_qty, step_size, created_at)
+VALUES (1, 'TESTUSDT', 1.0, 'ACTIVE', 'TEST', 'USDT', 1.0, 1.0, 1.0, 1.0, NOW());

@@ -2,8 +2,16 @@ import http from 'k6/http';
 import { check } from 'k6';
 
 export const options = {
-    vus: 100,
-    iterations: 100,
+    scenarios: {
+        constant_tps_test: {
+            executor: 'constant-arrival-rate',
+            rate: 10000,
+            timeUnit: '1s',
+            duration: '30s',
+            preAllocatedVUs: 500,
+            maxVUs: 2000,
+        },
+    },
 };
 
 export default function () {
@@ -26,6 +34,6 @@ export default function () {
     const res = http.post(url, payload, params);
 
     check(res, {
-        'is status 200': (r) => r.status === 200,
+        'is status 202': (r) => r.status === 202,
     });
 }
