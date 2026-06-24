@@ -46,7 +46,7 @@ public class MarketDataService {
     @Async("marketDataTaskExecutor")
     @EventListener
     public void onTradeCompleted(TradeCompletedEvent event) {
-        Trade trade = event.getTrade();
+        Trade trade = event.trade();
         long marketId = trade.getMarketId();
         long price = trade.getPrice();
         long quantity = trade.getQuantity();

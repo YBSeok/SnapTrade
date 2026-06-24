@@ -45,6 +45,8 @@ public class MarketMetadataCache {
             MarketSpec spec = new MarketSpec(
                     market.getId(),
                     market.getSymbol(),
+                    market.getBaseAsset(),
+                    market.getQuoteAsset(),
                     market.getMinPrice(),
                     market.getMaxPrice(),
                     market.getTickSize(),
