@@ -7,7 +7,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.UpdateTimestamp;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -21,24 +20,24 @@ public class Ticker {
     @Column(name = "market_id", nullable = false)
     private Long marketId;
 
-    @Column(name = "last_price", precision = 36, scale = 18) private BigDecimal lastPrice;
-    @Column(name = "price_change", precision = 36, scale = 18) private BigDecimal priceChange;
-    @Column(name = "price_change_pct", precision = 36, scale = 18) private BigDecimal priceChangePct;
+    @Column(name = "last_price") private long lastPrice;
+    @Column(name = "price_change") private long priceChange;
+    @Column(name = "price_change_pct") private long priceChangePct;
 
-    @Column(name = "high_24h", precision = 36, scale = 18) private BigDecimal high24h;
-    @Column(name = "low_24h", precision = 36, scale = 18) private BigDecimal low24h;
-    @Column(name = "volume_24h", precision = 36, scale = 18) private BigDecimal volume24h;
-    @Column(name = "quote_volume_24h", precision = 36, scale = 18) private BigDecimal quoteVolume24h;
+    @Column(name = "high_24h") private long high24h;
+    @Column(name = "low_24h") private long low24h;
+    @Column(name = "volume_24h") private long volume24h;
+    @Column(name = "quote_volume_24h") private long quoteVolume24h;
 
     @Column(name = "trade_count_24h")
-    private Long tradeCount24h;
+    private long tradeCount24h;
 
     @UpdateTimestamp
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
     @Builder
-    public Ticker(Long id, Long marketId, BigDecimal lastPrice, BigDecimal priceChange, BigDecimal priceChangePct, BigDecimal high24h, BigDecimal low24h, BigDecimal volume24h, BigDecimal quoteVolume24h, Long tradeCount24h) {
+    public Ticker(Long id, Long marketId, long lastPrice, long priceChange, long priceChangePct, long high24h, long low24h, long volume24h, long quoteVolume24h, long tradeCount24h) {
         this.id = id;
         this.marketId = marketId;
         this.lastPrice = lastPrice;
@@ -49,5 +48,28 @@ public class Ticker {
         this.volume24h = volume24h;
         this.quoteVolume24h = quoteVolume24h;
         this.tradeCount24h = tradeCount24h;
+    }
+
+    public void update(long price, long quantity, long quoteQuantity, long openPrice24h) {
+        this.lastPrice = price;
+        this.volume24h += quantity;
+        this.quoteVolume24h += quoteQuantity;
+        this.tradeCount24h++;
+
+        if (price > this.high24h) {
+            this.high24h = price;
+        }
+
+        if (this.low24h == 0 || price < this.low24h) {
+            this.low24h = price;
+        }
+
+        if (openPrice24h > 0) {
+            this.priceChange = price - openPrice24h;
+            this.priceChangePct = (this.priceChange * 10000L) / openPrice24h;
+        } else {
+            this.priceChange = 0;
+            this.priceChangePct = 0;
+        }
     }
 }

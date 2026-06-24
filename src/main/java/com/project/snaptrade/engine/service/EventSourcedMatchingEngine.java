@@ -10,14 +10,14 @@ import com.lmax.disruptor.dsl.ProducerType;
 import com.lmax.disruptor.util.DaemonThreadFactory;
 import com.project.snaptrade.engine.Dto.OrderRequestDto;
 import com.project.snaptrade.engine.domain.*;
-import com.project.snaptrade.engine.domain.constant.EventType;
-import com.project.snaptrade.engine.domain.constant.OrderSide;
-import com.project.snaptrade.engine.domain.constant.OrderStatus;
+import com.project.snaptrade.engine.domain.constant.*;
 import com.project.snaptrade.engine.repository.EventExecutionRepository;
 import com.project.snaptrade.engine.repository.ExecutionRepository;
 import com.project.snaptrade.engine.repository.OrderRepository;
 import com.project.snaptrade.engine.repository.TradeRepository;
 import com.project.snaptrade.market.domain.Market;
+import com.project.snaptrade.market.domain.MarketSpec;
+import com.project.snaptrade.market.dto.TradeCompletedEvent;
 import com.project.snaptrade.market.repository.MarketRepository;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -26,6 +26,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -41,19 +42,11 @@ import java.util.concurrent.atomic.AtomicLong;
 @RequiredArgsConstructor
 public class EventSourcedMatchingEngine {
     private static final Logger log = LoggerFactory.getLogger(EventSourcedMatchingEngine.class);
-    private record MatchPayload(
-            Trade trade,
-            Order makerOrder,
-            Order takerOrder,
-            List<OrderEvent> events,
-            List<OrderTrace> traces,
-            long projectionEnterTs
-    ) {
-        public MatchPayload(Trade trade, Order makerOrder, Order takerOrder, List<OrderEvent> events, List<OrderTrace> traces) {
-            this(trade, makerOrder, takerOrder, events, traces, System.nanoTime());
-        }
+    public enum EngineCommand {
+        PLACE, CANCEL
     }
     public static class EngineEvent {
+        public EngineCommand command;
         public OrderTrace trace;
         public final List<Trade> trades = new ArrayList<>(16);
         public final List<OrderEvent> orderEvents = new ArrayList<>(32);
@@ -71,11 +64,9 @@ public class EventSourcedMatchingEngine {
         }
     }
 
+    private final ApplicationEventPublisher eventPublisher;
     private final ObjectMapper objectMapper;
-
-    private final BlockingQueue<OrderTrace> orderQueue = new LinkedBlockingQueue<>();
-    private final BlockingQueue<MatchPayload> journalQueue = new LinkedBlockingQueue<>();
-    private final BlockingQueue<MatchPayload> projectionQueue = new LinkedBlockingQueue<>();
+    private final MarketMetadataCache marketCache;
 
     private Disruptor<EngineEvent> disruptor;
     private RingBuffer<EngineEvent> ringBuffer;
@@ -140,20 +131,14 @@ public class EventSourcedMatchingEngine {
         log.info("System initializing: Replaying events to reconstruct OrderBooks...");
         long startTime = System.nanoTime();
 
-        // 1. 모든 이벤트를 시간순(TSID 생성순)으로 조회
-        // TSID는 시간 정렬을 보장하므로 ORDER BY id ASC를 사용하면 완벽한 시계열 재현이 가능합니다.
         List<OrderEvent> allEvents = eventExecutionRepository.findAllEventsOrderByIdAsc();
-
-        // 임시 상태 저장소 (Replay 중인 주문들)
         Map<Long, Order> stateMap = new HashMap<>();
 
-        // 2. 이벤트 스트림 순차 재수행 (Replay)
         for (OrderEvent event : allEvents) {
             Long orderId = event.getOrderId();
 
             switch (event.getEventType()) {
                 case ORDER_PLACED:
-                    // payload를 파싱하여 초기 Order 객체 재구성
                     Order newOrder = reconstructOrderFromEvent(orderId, event);
                     stateMap.put(orderId, newOrder);
                     break;
@@ -161,23 +146,19 @@ public class EventSourcedMatchingEngine {
                 case TRADE_MATCHED:
                     Order existingOrder = stateMap.get(orderId);
                     if (existingOrder != null) {
-                        // 기존 상태에 체결량과 가격을 적용하여 상태 전진(Forwarding)
                         existingOrder.fill(event.getFillQty(), event.getFillPrice());
-
-                        // 완전히 체결되거나 취소된 주문은 호가창에 올릴 필요가 없으므로 메모리에서 제거
                         if (existingOrder.getStatus() == OrderStatus.FILLED || existingOrder.getStatus() == OrderStatus.CANCELED) {
                             stateMap.remove(orderId);
                         }
                     }
                     break;
 
-                case ORDER_CANCELED: // 취소 이벤트가 존재할 경우
+                case ORDER_CANCELED:
                     stateMap.remove(orderId);
                     break;
             }
         }
 
-        // 3. 재수행 완료 후, stateMap에 남아있는 데이터가 곧 현재 '활성화된 주문(Active Orders)'임
         for (Order activeOrder : stateMap.values()) {
             Long marketId = activeOrder.getMarketId();
             OrderBook orderBook = orderBooks.computeIfAbsent(marketId, id -> new OrderBook());
@@ -219,7 +200,7 @@ public class EventSourcedMatchingEngine {
 
         disruptor.handleEventsWith(new MatchingEventHandler())
                 .then(new JournalEventHandler())
-                .then(new ProjectionEventHandler());
+                .then(new ProjectionEventHandler(), new PublisherEventHandler());
 
         ringBuffer = disruptor.start();
         log.info("LMAX Disruptor Pipeline started successfully.");
@@ -250,29 +231,19 @@ public class EventSourcedMatchingEngine {
 
         ringBuffer.publishEvent((event, sequence) -> {
             event.clear();
+            event.command = EngineCommand.PLACE;
             event.trace = trace;
         });
     }
 
-    // ==========================================
-    // 1. Matching Worker
-    // ==========================================
-//    private void startMatchingThread() {
-//        new Thread(() -> {
-//            while (true) {
-//                try {
-//                    OrderTrace trace = orderQueue.take();
-//                    engineQueueTimer.record(Duration.ofNanos(System.nanoTime() - trace.getEngineEnterTs()));
-//
-//                    trace.markMatchStart();
-//                    processMatch(trace);
-//                    trace.markMatchEnd();
-//
-//                    coreMatchingTimer.record(Duration.ofNanos(trace.getMatchEndTs() - trace.getMatchStartTs()));
-//                } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
-//            }
-//        }, "Engine-Core-Thread").start();
-//    }
+    public void cancelOrder(OrderTrace trace) {
+        trace.markEngineEnter();
+        ringBuffer.publishEvent((event, sequence) -> {
+            event.clear();
+            event.command = EngineCommand.CANCEL;
+            event.trace = trace;
+        });
+    }
 
     private class MatchingEventHandler implements EventHandler<EngineEvent> {
         @Override
@@ -281,9 +252,15 @@ public class EventSourcedMatchingEngine {
             engineQueueTimer.record(Duration.ofNanos(System.nanoTime() - trace.getEngineEnterTs()));
 
             long matchStart = System.nanoTime();
-            processMatch(event);
-            coreMatchingTimer.record(Duration.ofNanos(System.nanoTime() - matchStart));
 
+            // [수정] 명령어 타입에 따른 라우팅 분기
+            if (event.command == EngineCommand.PLACE) {
+                processMatch(event);
+            } else if (event.command == EngineCommand.CANCEL) {
+                processCancel(event);
+            }
+
+            coreMatchingTimer.record(Duration.ofNanos(System.nanoTime() - matchStart));
             event.matchEndTs = System.nanoTime();
         }
     }
@@ -291,10 +268,48 @@ public class EventSourcedMatchingEngine {
     private void processMatch(EngineEvent event) {
         Order takerOrder = event.trace.getOrder();
         Long marketId = takerOrder.getMarketId();
+        MarketSpec spec = marketCache.getSpec(marketId);
         OrderBook orderBook = orderBooks.computeIfAbsent(marketId, id -> new OrderBook());
 
         long remainingQty = takerOrder.getOrigQty();
         OrderSide opponentSide = takerOrder.getSide() == OrderSide.BUY ? OrderSide.SELL : OrderSide.BUY;
+
+        boolean isMarketOrder = takerOrder.getOrderType() == OrderType.MARKET;
+
+        // [고도화] TIF 및 고급 주문 옵션 추출
+        boolean isPostOnly = takerOrder.isPostOnly();
+        boolean isFok = takerOrder.getTimeInForce() == TimeInForce.FOK;
+        boolean isIoc = takerOrder.getTimeInForce() == TimeInForce.IOC;
+
+        Queue<Order> initialBestQueue = orderBook.getBestPriceQueue(opponentSide);
+
+        // [고도화] Post-Only 정책 검증: 인입 시점에 즉시 체결 환경이면 주문 자체를 Reject
+        if (isPostOnly && initialBestQueue != null && !initialBestQueue.isEmpty()) {
+            Order bestMaker = initialBestQueue.peek();
+            if ((takerOrder.getSide() == OrderSide.BUY && takerOrder.getPrice() >= bestMaker.getPrice()) ||
+                    (takerOrder.getSide() == OrderSide.SELL && takerOrder.getPrice() <= bestMaker.getPrice())) {
+
+                takerOrder.reject(); // 상태를 REJECTED로 전이
+                event.orderEvents.add(createOrderEvent(takerOrder, null, EventType.ORDER_REJECTED, null, OrderStatus.REJECTED, 0L, 0L));
+                event.modifiedOrders.add(takerOrder);
+                return;
+            }
+        }
+
+        // [고도화] FOK(Fill-Or-Kill) 사전 검증: 호가창 전체 물량이 주문 수량을 만족하지 못하면 통째로 Kill
+        if (isFok && !orderBook.hasEnoughLiquidity(opponentSide, remainingQty, takerOrder.getPrice(), isMarketOrder)) {
+            takerOrder.cancel(remainingQty);
+            event.orderEvents.add(createOrderEvent(takerOrder, null, EventType.ORDER_CANCELED, null, OrderStatus.CANCELED, 0L, 0L));
+            event.modifiedOrders.add(takerOrder);
+            return;
+        }
+
+        // [고도화] 시장가 가격 보호 대역선 계산 (최우선 호가 대비 ±5%)
+        long priceBandLimit = 0L;
+        if (initialBestQueue != null && !initialBestQueue.isEmpty()) {
+            long bestPrice = initialBestQueue.peek().getPrice();
+            priceBandLimit = takerOrder.getSide() == OrderSide.BUY ? (long)(bestPrice * 1.05) : (long)(bestPrice * 0.95);
+        }
 
         if (takerOrder.getExecutedQty() == 0L) {
             event.orderEvents.add(createOrderEvent(takerOrder, null, EventType.ORDER_PLACED, null, OrderStatus.NEW, 0L, 0L));
@@ -305,8 +320,27 @@ public class EventSourcedMatchingEngine {
             if (bestPriceQueue == null || bestPriceQueue.isEmpty()) break;
 
             Order makerOrder = bestPriceQueue.peek();
-            if (takerOrder.getSide() == OrderSide.BUY && takerOrder.getPrice() < makerOrder.getPrice()) break;
-            if (takerOrder.getSide() == OrderSide.SELL && takerOrder.getPrice() > makerOrder.getPrice()) break;
+
+            // 자전 거래 방지
+            if (makerOrder.getUserId().equals(takerOrder.getUserId())) {
+                OrderStatus takerStatusBefore = takerOrder.getStatus();
+                takerOrder.cancel(remainingQty);
+                event.orderEvents.add(createOrderEvent(takerOrder, null, EventType.ORDER_CANCELED, takerStatusBefore, takerOrder.getStatus(), 0L, 0L));
+                remainingQty = 0L;
+                break;
+            }
+
+            // [고도화] 시장가 가격 보호 대역(Price Band) 돌파 검사
+            if (isMarketOrder && priceBandLimit > 0L) {
+                if (takerOrder.getSide() == OrderSide.BUY && makerOrder.getPrice() > priceBandLimit) break;
+                if (takerOrder.getSide() == OrderSide.SELL && makerOrder.getPrice() < priceBandLimit) break;
+            }
+
+            // 지정가 조건 검사
+            if (!isMarketOrder) {
+                if (takerOrder.getSide() == OrderSide.BUY && takerOrder.getPrice() < makerOrder.getPrice()) break;
+                if (takerOrder.getSide() == OrderSide.SELL && takerOrder.getPrice() > makerOrder.getPrice()) break;
+            }
 
             long fillQty = Math.min(remainingQty, makerOrder.getRemainingQty());
             long fillPrice = makerOrder.getPrice();
@@ -325,6 +359,9 @@ public class EventSourcedMatchingEngine {
 
             event.modifiedOrders.add(makerOrder);
 
+            long takerFee = calculateFee(fillPrice, fillQty, spec.takerFeeRate());
+            long makerFee = calculateFee(fillPrice, fillQty, spec.makerFeeRate());
+
             Long buyerId = takerOrder.getSide() == OrderSide.BUY ? takerOrder.getUserId() : makerOrder.getUserId();
             Long sellerId = takerOrder.getSide() == OrderSide.SELL ? takerOrder.getUserId() : makerOrder.getUserId();
 
@@ -338,6 +375,8 @@ public class EventSourcedMatchingEngine {
                     .quoteQuantity(fillPrice * fillQty)
                     .price(fillPrice)
                     .quantity(fillQty)
+                    .takerFee(takerFee)
+                    .makerFee(makerFee)
                     .sequenceNo(tradeSequenceGenerator.incrementAndGet())
                     .build();
 
@@ -346,10 +385,36 @@ public class EventSourcedMatchingEngine {
             event.orderEvents.add(createOrderEvent(takerOrder, trade.getId(), EventType.TRADE_MATCHED, takerStatusBefore, takerOrder.getStatus(), fillQty, fillPrice));
         }
 
+        // 잔여 수량 처리 및 TIF(IOC) 조건 반영
         if (remainingQty > 0L) {
-            orderBook.addOrder(takerOrder);
+            if (isMarketOrder || isIoc) {
+                OrderStatus statusBeforeCancel = takerOrder.getStatus();
+                takerOrder.cancel(remainingQty);
+                event.orderEvents.add(createOrderEvent(takerOrder, null, EventType.ORDER_CANCELED, statusBeforeCancel, takerOrder.getStatus(), 0L, 0L));
+            } else {
+                orderBook.addOrder(takerOrder);
+            }
         }
         event.modifiedOrders.add(takerOrder);
+    }
+
+    private void processCancel(EngineEvent event) {
+        Order targetOrder = event.trace.getOrder();
+        Long marketId = targetOrder.getMarketId();
+        OrderBook orderBook = orderBooks.get(marketId);
+
+        if (orderBook != null) {
+            // 호가창에서 대상 주문 제거 시도 (OrderBook.removeOrder가 boolean을 반환한다고 가정)
+            boolean removed = orderBook.removeOrder(targetOrder);
+
+            if (removed) {
+                OrderStatus statusBefore = targetOrder.getStatus();
+                targetOrder.cancel(targetOrder.getRemainingQty());
+
+                event.modifiedOrders.add(targetOrder);
+                event.orderEvents.add(createOrderEvent(targetOrder, null, EventType.ORDER_CANCELED, statusBefore, targetOrder.getStatus(), 0L, 0L));
+            }
+        }
     }
 
     private OrderEvent createOrderEvent(Order order, Long tradeId, EventType eventType,
@@ -379,60 +444,11 @@ public class EventSourcedMatchingEngine {
                 .build();
     }
 
-    // ==========================================
-    // 2. Journal Worker
-    // ==========================================
-//    private void startJournalWorker() {
-//        new Thread(() -> {
-//            final int BATCH_SIZE = 1000;
-//            final List<MatchPayload> buffer = new ArrayList<>(BATCH_SIZE);
-//            final List<Trade> trades = new ArrayList<>(BATCH_SIZE);
-//            final List<OrderEvent> events = new ArrayList<>(BATCH_SIZE * 2);
-//
-//            while (true) {
-//                try {
-//                    MatchPayload firstPayload = journalQueue.take();
-//                    if (!firstPayload.traces().isEmpty()) {
-//                        journalQueueTimer.record(Duration.ofNanos(System.nanoTime() - firstPayload.traces().get(0).getPersistEnterTs()));
-//                    }
-//
-//                    buffer.add(firstPayload);
-//                    journalQueue.drainTo(buffer, BATCH_SIZE - 1);
-//
-//                    trades.clear();
-//                    events.clear();
-//
-//                    for (MatchPayload payload : buffer) {
-//                        if (payload.trade() != null) trades.add(payload.trade());
-//                        if (payload.events() != null) events.addAll(payload.events());
-//                        if (!payload.traces().isEmpty()) payload.traces().get(0).markDbWriteStart();
-//                    }
-//
-//                    journalDbIoTimer.record(() -> eventExecutionRepository.appendEvents(trades, events));
-//
-//                    for (MatchPayload payload : buffer) {
-//                        if (!payload.traces().isEmpty()) payload.traces().get(0).markDbWriteEnd();
-//
-//                        projectionQueue.offer(new MatchPayload(
-//                                payload.trade(),
-//                                payload.makerOrder(),
-//                                payload.takerOrder(),
-//                                payload.events(),
-//                                payload.traces(),
-//                                System.nanoTime()
-//                        ));
-//                    }
-//
-//                    buffer.clear();
-//
-//                } catch (InterruptedException e) {
-//                    Thread.currentThread().interrupt(); break;
-//                } catch (Exception e) {
-//                    log.error("Journal worker encountered an error. Events were NOT passed to Projection.", e);
-//                }
-//            }
-//        }, "Journal-Worker-Thread").start();
-//    }
+    private long calculateFee(long price, long qty, long feeRate) {
+        long notional = (price * qty) / 100_000_000L;
+        return (notional * feeRate) / 1_000_000L;
+    }
+
     private class JournalEventHandler implements EventHandler<EngineEvent> {
         private final List<Trade> batchTrades = new ArrayList<>(1000);
         private final List<OrderEvent> batchEvents = new ArrayList<>(2000);
@@ -452,47 +468,6 @@ public class EventSourcedMatchingEngine {
         }
     }
 
-    // ==========================================
-    // 3. Projection Worker
-    // ==========================================
-//    private void startProjectionWorker() {
-//        new Thread(() -> {
-//            final int BATCH_SIZE = 1000;
-//            final List<MatchPayload> buffer = new ArrayList<>(BATCH_SIZE);
-//            final Map<Long, Order> orderMap = new HashMap<>(BATCH_SIZE);
-//
-//            while (true) {
-//                try {
-//                    MatchPayload firstPayload = projectionQueue.take();
-//
-//                    projectionQueueTimer.record(Duration.ofNanos(System.nanoTime() - firstPayload.projectionEnterTs()));
-//
-//                    buffer.add(firstPayload);
-//                    projectionQueue.drainTo(buffer, BATCH_SIZE - 1);
-//
-//                    orderMap.clear();
-//
-//                    for (MatchPayload payload : buffer) {
-//                        if (payload.makerOrder() != null) orderMap.put(payload.makerOrder().getId(), payload.makerOrder());
-//                        if (payload.takerOrder() != null) orderMap.put(payload.takerOrder().getId(), payload.takerOrder());
-//                    }
-//
-//                    List<Order> ordersToUpdate = new ArrayList<>(orderMap.values());
-//
-//                    if (!ordersToUpdate.isEmpty()) {
-//                        projectionDbIoTimer.record(() -> eventExecutionRepository.updateReadModels(ordersToUpdate));
-//                    }
-//
-//                    buffer.clear();
-//
-//                } catch (InterruptedException e) {
-//                    Thread.currentThread().interrupt(); break;
-//                } catch (Exception e) {
-//                    log.error("Projection worker encountered an error", e);
-//                }
-//            }
-//        }, "Projection-Worker-Thread").start();
-//    }
     private class ProjectionEventHandler implements EventHandler<EngineEvent> {
         private final Map<Long, Order> batchOrderMap = new HashMap<>(1000);
 
@@ -506,6 +481,24 @@ public class EventSourcedMatchingEngine {
                 List<Order> ordersToUpdate = new ArrayList<>(batchOrderMap.values());
                 projectionDbIoTimer.record(() -> eventExecutionRepository.updateReadModels(ordersToUpdate));
                 batchOrderMap.clear();
+            }
+        }
+    }
+
+    private class PublisherEventHandler implements EventHandler<EngineEvent> {
+        @Override
+        public void onEvent(EngineEvent event, long sequence, boolean endOfBatch) {
+            try {
+                for (Trade trade : event.trades) {
+                    eventPublisher.publishEvent(new TradeCompletedEvent(trade));
+                }
+                for (OrderEvent orderEvent : event.orderEvents) {
+                    eventPublisher.publishEvent(orderEvent);
+                }
+            } catch (Exception e) {
+                log.error("[Engine-Publisher] Failed to publish events at sequence: {}", sequence, e);
+            } finally {
+                event.clear();
             }
         }
     }
