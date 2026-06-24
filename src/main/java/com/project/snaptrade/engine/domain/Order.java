@@ -46,6 +46,9 @@ public class Order {
     @Column(name = "cumulative_quote_qty", nullable = false)
     private long cumulativeQuoteQty = 0L;
 
+    @Column(nullable = false)
+    private boolean postOnly;
+
     @Enumerated(EnumType.STRING)
     @Column(length = 20, nullable = false) private OrderStatus status = OrderStatus.NEW;
 
@@ -99,5 +102,32 @@ public class Order {
         order.timeInForce = TimeInForce.GTC;
 
         return order;
+    }
+
+    public void cancel(long cancelQty) {
+        if (cancelQty <= 0) {
+            throw new IllegalArgumentException("Cancel quantity must be greater than zero");
+        }
+
+        long currentRemaining = getRemainingQty();
+        if (cancelQty > currentRemaining) {
+            throw new IllegalStateException("Cannot cancel more than remaining quantity. Remaining: " + currentRemaining + ", Requested: " + cancelQty);
+        }
+
+        this.status = OrderStatus.CANCELED;
+    }
+
+    public void cancelRemaining() {
+        if (this.status == OrderStatus.CANCELED || this.status == OrderStatus.FILLED) {
+            return;
+        }
+        cancel(getRemainingQty());
+    }
+
+    public void reject() {
+        if (this.status != OrderStatus.NEW) {
+            throw new IllegalStateException("Only NEW orders can be rejected");
+        }
+        this.status = OrderStatus.REJECTED;
     }
 }
