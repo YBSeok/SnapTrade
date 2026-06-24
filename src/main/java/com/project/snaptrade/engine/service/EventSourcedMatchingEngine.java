@@ -276,27 +276,26 @@ public class EventSourcedMatchingEngine {
 
         boolean isMarketOrder = takerOrder.getOrderType() == OrderType.MARKET;
 
-        // [고도화] TIF 및 고급 주문 옵션 추출
         boolean isPostOnly = takerOrder.isPostOnly();
         boolean isFok = takerOrder.getTimeInForce() == TimeInForce.FOK;
         boolean isIoc = takerOrder.getTimeInForce() == TimeInForce.IOC;
 
         Queue<Order> initialBestQueue = orderBook.getBestPriceQueue(opponentSide);
 
-        // [고도화] Post-Only 정책 검증: 인입 시점에 즉시 체결 환경이면 주문 자체를 Reject
+        // Post-Only 정책 검증
         if (isPostOnly && initialBestQueue != null && !initialBestQueue.isEmpty()) {
             Order bestMaker = initialBestQueue.peek();
             if ((takerOrder.getSide() == OrderSide.BUY && takerOrder.getPrice() >= bestMaker.getPrice()) ||
                     (takerOrder.getSide() == OrderSide.SELL && takerOrder.getPrice() <= bestMaker.getPrice())) {
 
-                takerOrder.reject(); // 상태를 REJECTED로 전이
+                takerOrder.reject();
                 event.orderEvents.add(createOrderEvent(takerOrder, null, EventType.ORDER_REJECTED, null, OrderStatus.REJECTED, 0L, 0L));
                 event.modifiedOrders.add(takerOrder);
                 return;
             }
         }
 
-        // [고도화] FOK(Fill-Or-Kill) 사전 검증: 호가창 전체 물량이 주문 수량을 만족하지 못하면 통째로 Kill
+        // FOK(Fill-Or-Kill) 검증
         if (isFok && !orderBook.hasEnoughLiquidity(opponentSide, remainingQty, takerOrder.getPrice(), isMarketOrder)) {
             takerOrder.cancel(remainingQty);
             event.orderEvents.add(createOrderEvent(takerOrder, null, EventType.ORDER_CANCELED, null, OrderStatus.CANCELED, 0L, 0L));
@@ -304,7 +303,7 @@ public class EventSourcedMatchingEngine {
             return;
         }
 
-        // [고도화] 시장가 가격 보호 대역선 계산 (최우선 호가 대비 ±5%)
+        // 시장가 가격 보호 대역선 계산 (최우선 호가 대비 ±5%)
         long priceBandLimit = 0L;
         if (initialBestQueue != null && !initialBestQueue.isEmpty()) {
             long bestPrice = initialBestQueue.peek().getPrice();
@@ -330,7 +329,7 @@ public class EventSourcedMatchingEngine {
                 break;
             }
 
-            // [고도화] 시장가 가격 보호 대역(Price Band) 돌파 검사
+            // 시장가 가격 보호 대역 돌파 검사
             if (isMarketOrder && priceBandLimit > 0L) {
                 if (takerOrder.getSide() == OrderSide.BUY && makerOrder.getPrice() > priceBandLimit) break;
                 if (takerOrder.getSide() == OrderSide.SELL && makerOrder.getPrice() < priceBandLimit) break;
@@ -365,11 +364,16 @@ public class EventSourcedMatchingEngine {
             Long buyerId = takerOrder.getSide() == OrderSide.BUY ? takerOrder.getUserId() : makerOrder.getUserId();
             Long sellerId = takerOrder.getSide() == OrderSide.SELL ? takerOrder.getUserId() : makerOrder.getUserId();
 
+            Long makerUserId = makerOrder.getUserId();
+            Long takerUserId = takerOrder.getUserId();
+
             Trade trade = Trade.builder()
                     .id(TsidCreator.getTsid().toLong())
                     .marketId(marketId)
                     .makerOrderId(makerOrder.getId())
                     .takerOrderId(takerOrder.getId())
+                    .makerUserId(makerUserId)
+                    .takerUserId(takerUserId)
                     .buyerId(buyerId)
                     .sellerId(sellerId)
                     .quoteQuantity(fillPrice * fillQty)
@@ -404,7 +408,6 @@ public class EventSourcedMatchingEngine {
         OrderBook orderBook = orderBooks.get(marketId);
 
         if (orderBook != null) {
-            // 호가창에서 대상 주문 제거 시도 (OrderBook.removeOrder가 boolean을 반환한다고 가정)
             boolean removed = orderBook.removeOrder(targetOrder);
 
             if (removed) {
@@ -458,7 +461,6 @@ public class EventSourcedMatchingEngine {
             batchTrades.addAll(event.trades);
             batchEvents.addAll(event.orderEvents);
 
-            // 스마트 배칭(Smart Batching): 디스럽터 링버퍼가 밀려있다면 IO 트랜잭션을 묶어서 일괄 처리
             if (endOfBatch && (!batchTrades.isEmpty() || !batchEvents.isEmpty())) {
                 journalDbIoTimer.record(() -> eventExecutionRepository.appendEvents(batchTrades, batchEvents));
                 batchTrades.clear();

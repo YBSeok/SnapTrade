@@ -25,8 +25,8 @@ public class StopLimitTriggerEngine {
     @Async("triggerEngineTaskExecutor")
     @EventListener
     public void onTradeCompleted(TradeCompletedEvent event) {
-        long currentPrice = event.getTrade().getPrice();
-        Long marketId = event.getTrade().getMarketId();
+        long currentPrice = event.trade().getPrice();
+        Long marketId = event.trade().getMarketId();
 
         List<OrderTrace> stopOrders = stopOrderBook.get(marketId);
         if (stopOrders == null || stopOrders.isEmpty()) return;

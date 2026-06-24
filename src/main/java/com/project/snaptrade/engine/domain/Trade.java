@@ -22,6 +22,9 @@ public class Trade {
     @Column(name = "maker_order_id", nullable = false) private Long makerOrderId;
     @Column(name = "taker_order_id", nullable = false) private Long takerOrderId;
 
+    @Column(name = "maker_user_id", nullable = false) private Long makerUserId;
+    @Column(name = "taker_user_id", nullable = false) private Long takerUserId;
+
     @Column(name = "buyer_id", nullable = false) private Long buyerId;
     @Column(name = "seller_id", nullable = false) private Long sellerId;
 
@@ -39,11 +42,16 @@ public class Trade {
     @Column(name = "traded_at", updatable = false) private LocalDateTime tradedAt;
 
     @Builder
-    public Trade(long id, long marketId, long makerOrderId, long takerOrderId, long buyerId, long sellerId, long price, long quantity, long quoteQuantity, long makerFee, long takerFee, Long sequenceNo) {
+    public Trade(long id, long marketId, long makerOrderId, long takerOrderId,
+                 Long makerUserId, Long takerUserId, // 생성자 파라미터 추가
+                 long buyerId, long sellerId, long price, long quantity,
+                 long quoteQuantity, long makerFee, long takerFee, Long sequenceNo) {
         this.id = id;
         this.marketId = marketId;
         this.makerOrderId = makerOrderId;
         this.takerOrderId = takerOrderId;
+        this.makerUserId = makerUserId;
+        this.takerUserId = takerUserId;
         this.buyerId = buyerId;
         this.sellerId = sellerId;
         this.price = price;

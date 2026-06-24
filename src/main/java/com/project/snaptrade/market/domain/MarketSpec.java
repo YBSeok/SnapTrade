@@ -4,6 +4,10 @@ public record MarketSpec(
         Long marketId,
         String symbol,
 
+        // 원장 처리 식별자
+        String baseAsset,
+        String quoteAsset,
+
         // 가격 제약
         long minPrice,
         long maxPrice,
