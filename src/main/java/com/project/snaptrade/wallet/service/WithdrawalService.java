@@ -22,13 +22,9 @@ public class WithdrawalService {
     private final AccountLedgerRepository ledgerRepository;
     private final WithdrawalRepository withdrawalRepository;
 
-    /**
-     * 1단계: 출금 요청 (잔고 동결)
-     * 이 시점에 available -> locked로 이동시킵니다.
-     */
     @Transactional
     public Long requestWithdrawal(Long userId, String assetSymbol, BigDecimal amount, String address) {
-        // 1. 계좌 조회 및 동결
+        // 계좌 조회 및 동결
         Account account = accountRepository.findByUserIdAndAssetSymbol(userId, assetSymbol)
                 .orElseThrow(() -> new IllegalStateException("계좌가 존재하지 않습니다."));
 
@@ -36,7 +32,7 @@ public class WithdrawalService {
         account.holdBalance(amountAsLong);
         accountRepository.save(account);
 
-        // 2. 출금 레코드 생성
+        // 출금 레코드 생성
         Withdrawal withdrawal = Withdrawal.builder()
                 .userId(userId)
                 .assetSymbol(assetSymbol)
@@ -46,16 +42,12 @@ public class WithdrawalService {
                 .build();
         withdrawalRepository.save(withdrawal);
 
-        // 3. 원장 기록 (동결됨)
+        // 원장 기록 (동결됨)
         saveLedger(account, LedgerEntryType.WITHDRAWAL_LOCK, -amountAsLong, withdrawal.getId());
 
         return withdrawal.getId();
     }
 
-    /**
-     * 2단계: 출금 완료 (최종 차감)
-     * 외부(블록체인) 전송이 성공한 후 호출됩니다.
-     */
     @Transactional
     public void completeWithdrawal(Long withdrawalId, String txHash) {
         Withdrawal withdrawal = withdrawalRepository.findById(withdrawalId)
@@ -64,16 +56,16 @@ public class WithdrawalService {
         Account account = accountRepository.findByUserIdAndAssetSymbol(withdrawal.getUserId(), withdrawal.getAssetSymbol())
                 .orElseThrow(() -> new IllegalStateException("계좌가 존재하지 않습니다."));
 
-        // 1. 상태 업데이트
+        // 상태 업데이트
         withdrawal.complete(txHash);
         withdrawalRepository.save(withdrawal);
 
-        // 2. 최종 차감 (locked -> total 감소)
+        // 최종 차감 (locked -> total 감소)
         long amountAsLong = withdrawal.getAmount().movePointRight(8).longValue();
         account.deductLockedBalance(amountAsLong);
         accountRepository.save(account);
 
-        // 3. 원장 기록 (최종 출금)
+        // 원장 기록 (최종 출금)
         saveLedger(account, LedgerEntryType.WITHDRAWAL_FILL, -amountAsLong, withdrawal.getId());
     }
 

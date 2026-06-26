@@ -1,6 +1,7 @@
 package com.project.snaptrade.market.service;
 
 import com.github.f4b6a3.tsid.TsidCreator;
+import com.project.snaptrade.common.websocket.WebSocketBroadcastService;
 import com.project.snaptrade.engine.domain.Trade;
 import com.project.snaptrade.market.domain.Kline;
 import com.project.snaptrade.market.domain.Ticker;
@@ -53,8 +54,7 @@ public class MarketDataService {
         long quoteQuantity = trade.getQuoteQuantity();
         long currentMs = System.currentTimeMillis();
 
-        // 1. Ticker 갱신
-        // O(1) 캐시에서 24시간 전 시가를 가져옵니다. (캐시에 없으면 현재가로 임시 세팅하여 등락률 0% 처리)
+        // Ticker 갱신
         long openPrice24h = openPrice24hCache.getOrDefault(marketId, price);
 
         Ticker ticker = tickerBuffer.computeIfAbsent(marketId, this::loadTickerFromDbOrInit);
@@ -62,7 +62,7 @@ public class MarketDataService {
 
         webSocketBroadcastService.broadcastTicker(ticker);
 
-        // 2. Kline 갱신 (1초, 1분봉)
+        // Kline 갱신 (1초, 1분봉)
         for (ChartInterval interval : HOT_INTERVALS) {
             KlineKey key = new KlineKey(marketId, interval);
             long openTimeMs = interval.getOpenTimeMs(currentMs);
@@ -81,7 +81,6 @@ public class MarketDataService {
                 return existing;
             });
 
-            // Kline은 1초봉, 1분봉이 생성/갱신될 때마다 각각 브로드캐스트합니다.
             webSocketBroadcastService.broadcastKline(kline);
         }
     }

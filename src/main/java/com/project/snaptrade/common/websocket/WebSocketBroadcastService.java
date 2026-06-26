@@ -1,4 +1,4 @@
-package com.project.snaptrade.market.service;
+package com.project.snaptrade.common.websocket;
 
 import com.project.snaptrade.market.domain.Kline;
 import com.project.snaptrade.market.domain.Ticker;
@@ -25,5 +25,15 @@ public class WebSocketBroadcastService {
     public void broadcastKline(Kline kline) {
         String destination = String.format("/topic/kline/%d/%s", kline.getMarketId(), kline.getInterval());
         messagingTemplate.convertAndSend(destination, kline);
+    }
+
+    @Async("webSocketTaskExecutor")
+    public void sendPrivateNotification(Long userId, Object notificationData) {
+        // /user/{userId}/queue/notifications
+        messagingTemplate.convertAndSendToUser(
+                String.valueOf(userId),
+                "/queue/notifications",
+                notificationData
+        );
     }
 }
