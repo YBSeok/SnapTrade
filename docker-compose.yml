@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   mysql:
     image: mysql:8.4
@@ -29,9 +27,45 @@ services:
     networks:
       - snap-trade-network
 
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: snap-trade-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - snap-trade-prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - snap-trade-network
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: snap-trade-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - snap-trade-grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    networks:
+      - snap-trade-network
+
 volumes:
   snap-trade-mysql-data:
   snap-trade-redis-data:
+  snap-trade-prometheus-data:
+  snap-trade-grafana-data:
 
 networks:
   snap-trade-network:

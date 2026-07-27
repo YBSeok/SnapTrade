@@ -36,5 +36,9 @@ out/
 ### VS Code ###
 .vscode/
 
-### Docker ###
-docker-compose.yml
+### Monitoring (local native stack) ###
+monitoring/tools/
+monitoring/data/
+
+### Redis (local AOF) ###
+appendonlydir/

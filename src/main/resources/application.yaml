@@ -55,3 +55,4 @@ management:
   metrics:
     tags:
       application: snaptrade-engine
+      namespace: local
