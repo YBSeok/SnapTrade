@@ -1,7 +1,5 @@
 package com.project.snaptrade.common.websocket;
 
-import com.project.snaptrade.market.domain.Kline;
-import com.project.snaptrade.market.domain.Ticker;
 import com.project.snaptrade.market.dto.KlineBroadcastDTO;
 import com.project.snaptrade.market.dto.TickerBroadcastDTO;
 import lombok.RequiredArgsConstructor;
@@ -13,7 +11,7 @@ import org.springframework.stereotype.Service;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class WebSocketBroadcastService {
+public class MarketBroadcastService {
 
     private final SimpMessagingTemplate messagingTemplate;
 
@@ -26,15 +24,5 @@ public class WebSocketBroadcastService {
     public void broadcastKline(KlineBroadcastDTO dto) {
         String destination = String.format("/topic/kline/%d/%s", dto.getMarketId(), dto.getInterval());
         messagingTemplate.convertAndSend(destination, dto);
-    }
-
-    @Async("webSocketTaskExecutor")
-    public void sendPrivateNotification(Long userId, Object notificationData) {
-        // /user/{userId}/queue/notifications
-        messagingTemplate.convertAndSendToUser(
-                String.valueOf(userId),
-                "/queue/notifications",
-                notificationData
-        );
     }
 }

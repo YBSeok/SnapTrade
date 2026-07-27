@@ -1,7 +1,7 @@
 package com.project.snaptrade.market.service;
 
 import com.github.f4b6a3.tsid.TsidCreator;
-import com.project.snaptrade.common.websocket.WebSocketBroadcastService;
+import com.project.snaptrade.common.websocket.MarketBroadcastService;
 import com.project.snaptrade.engine.domain.Trade;
 import com.project.snaptrade.market.domain.Kline;
 import com.project.snaptrade.market.domain.Ticker;
@@ -30,7 +30,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 @Service
 @RequiredArgsConstructor
 public class MarketDataService {
-    private final WebSocketBroadcastService webSocketBroadcastService;
+    private final MarketBroadcastService marketBroadcastService;
 
     private final KlineRepository klineRepository;
     private final KlineJdbcRepository klineJdbcRepository;
@@ -62,7 +62,7 @@ public class MarketDataService {
         Ticker ticker = tickerBuffer.computeIfAbsent(marketId, this::loadTickerFromDbOrInit);
         ticker.update(price, quantity, quoteQuantity, openPrice24h);
 
-        webSocketBroadcastService.broadcastTicker(TickerBroadcastDTO.from(ticker));
+        marketBroadcastService.broadcastTicker(TickerBroadcastDTO.from(ticker));
 
         // Kline 갱신 (1초, 1분봉)
         for (ChartInterval interval : HOT_INTERVALS) {
@@ -83,7 +83,7 @@ public class MarketDataService {
                 return existing;
             });
 
-            webSocketBroadcastService.broadcastKline(KlineBroadcastDTO.from(kline));
+            marketBroadcastService.broadcastKline(KlineBroadcastDTO.from(kline));
         }
     }
 

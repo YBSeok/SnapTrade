@@ -1,6 +1,8 @@
 package com.project.snaptrade.engine.repository;
 
-import com.project.snaptrade.engine.domain.*;
+import com.project.snaptrade.engine.domain.OrderEvent;
+import com.project.snaptrade.engine.domain.OrderProjectionSnapshot;
+import com.project.snaptrade.engine.domain.Trade;
 import com.project.snaptrade.engine.domain.constant.EventType;
 import com.project.snaptrade.engine.domain.constant.OrderStatus;
 import jakarta.transaction.Transactional;
@@ -69,7 +71,7 @@ public class EventExecutionRepository {
     }
 
     @Transactional
-    public void updateReadModels(List<Order> orders) {
+    public void updateReadModels(List<OrderProjectionSnapshot> orders) {
         if (!orders.isEmpty()) {
             jdbcTemplate.batchUpdate(
                     "INSERT INTO orders (id, user_id, market_id, side, order_type, time_in_force, price, orig_qty, executed_qty, cumulative_quote_qty, status, sequence_no, created_at, updated_at) " +
@@ -81,19 +83,19 @@ public class EventExecutionRepository {
                             "updated_at = NOW()",
                     new BatchPreparedStatementSetter() {
                         public void setValues(PreparedStatement ps, int i) throws SQLException {
-                            Order o = orders.get(i);
-                            ps.setLong(1, o.getId());
-                            ps.setLong(2, o.getUserId());
-                            ps.setLong(3, o.getMarketId());
-                            ps.setString(4, o.getSide().name());
-                            ps.setString(5, o.getOrderType().name());
-                            ps.setString(6, o.getTimeInForce().name());
-                            ps.setLong(7, o.getPrice());
-                            ps.setLong(8, o.getOrigQty());
-                            ps.setLong(9, o.getExecutedQty());
-                            ps.setLong(10, o.getCumulativeQuoteQty());
-                            ps.setString(11, o.getStatus().name());
-                            ps.setObject(12, o.getSequenceNo());
+                            OrderProjectionSnapshot o = orders.get(i);
+                            ps.setLong(1, o.id());
+                            ps.setLong(2, o.userId());
+                            ps.setLong(3, o.marketId());
+                            ps.setString(4, o.side().name());
+                            ps.setString(5, o.orderType().name());
+                            ps.setString(6, o.timeInForce().name());
+                            ps.setLong(7, o.price());
+                            ps.setLong(8, o.origQty());
+                            ps.setLong(9, o.executedQty());
+                            ps.setLong(10, o.cumulativeQuoteQty());
+                            ps.setString(11, o.status().name());
+                            ps.setObject(12, o.sequenceNo());
                         }
                         public int getBatchSize() { return orders.size(); }
                     });

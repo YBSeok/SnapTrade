@@ -8,6 +8,7 @@ import com.lmax.disruptor.RingBuffer;
 import com.lmax.disruptor.dsl.Disruptor;
 import com.lmax.disruptor.dsl.ProducerType;
 import com.lmax.disruptor.util.DaemonThreadFactory;
+import com.project.snaptrade.common.event.OrderNotificationEvent;
 import com.project.snaptrade.engine.Dto.OrderRequestDto;
 import com.project.snaptrade.engine.domain.*;
 import com.project.snaptrade.engine.domain.constant.*;
@@ -67,6 +68,7 @@ public class EventSourcedMatchingEngine {
     private final ApplicationEventPublisher eventPublisher;
     private final ObjectMapper objectMapper;
     private final MarketMetadataCache marketCache;
+    private final OrderProjectionWorker orderProjectionWorker;
 
     private Disruptor<EngineEvent> disruptor;
     private RingBuffer<EngineEvent> ringBuffer;
@@ -86,7 +88,6 @@ public class EventSourcedMatchingEngine {
     private Timer engineQueueTimer;
     private Timer coreMatchingTimer;
     private Timer journalDbIoTimer;
-    private Timer projectionDbIoTimer;
 
     private void preWarmSequences() {
         List<Market> markets = marketRepository.findAll();
@@ -117,7 +118,6 @@ public class EventSourcedMatchingEngine {
         this.engineQueueTimer = registerTimer("latency.engine.queue", "RingBuffer pending latency");
         this.coreMatchingTimer = registerTimer("latency.core.matching", "Pure matching execution time");
         this.journalDbIoTimer = registerTimer("latency.journal.db", "Journal DB INSERT Latency");
-        this.projectionDbIoTimer = registerTimer("latency.projection.db", "Projection DB UPDATE Latency");
 
         initDisruptor();
 
@@ -200,13 +200,13 @@ public class EventSourcedMatchingEngine {
 
         disruptor.handleEventsWith(new MatchingEventHandler())
                 .then(new JournalEventHandler())
-                .then(new ProjectionEventHandler(), new PublisherEventHandler());
+                .then(new PublisherEventHandler());
 
         ringBuffer = disruptor.start();
-        log.info("LMAX Disruptor Pipeline started successfully.");
+        log.info("LMAX Disruptor Pipeline started successfully. (Matching → Journal → Publisher; Projection is async)");
     }
 
-    public void placeOrder(OrderTrace trace) {
+    public Long placeOrder(OrderTrace trace) {
         trace.markEngineEnter();
         gatewayTimer.record(Duration.ofNanos(trace.getEngineEnterTs() - trace.getIngressTs()));
         OrderRequestDto request = trace.getRequestDto();
@@ -234,6 +234,8 @@ public class EventSourcedMatchingEngine {
             event.command = EngineCommand.PLACE;
             event.trace = trace;
         });
+
+        return newOrder.getId();
     }
 
     public void cancelOrder(OrderTrace trace) {
@@ -470,32 +472,45 @@ public class EventSourcedMatchingEngine {
         }
     }
 
-    private class ProjectionEventHandler implements EventHandler<EngineEvent> {
-        private final Map<Long, Order> batchOrderMap = new HashMap<>(1000);
-
-        @Override
-        public void onEvent(EngineEvent event, long sequence, boolean endOfBatch) {
-            for (Order order : event.modifiedOrders) {
-                batchOrderMap.put(order.getId(), order);
-            }
-
-            if (endOfBatch && !batchOrderMap.isEmpty()) {
-                List<Order> ordersToUpdate = new ArrayList<>(batchOrderMap.values());
-                projectionDbIoTimer.record(() -> eventExecutionRepository.updateReadModels(ordersToUpdate));
-                batchOrderMap.clear();
-            }
-        }
-    }
-
     private class PublisherEventHandler implements EventHandler<EngineEvent> {
         @Override
         public void onEvent(EngineEvent event, long sequence, boolean endOfBatch) {
             try {
+                // 알림용 orderId→Order 조회맵 + Projection용 불변 스냅샷 준비
+                Map<Long, Order> orderMap = new HashMap<>();
+                List<OrderProjectionSnapshot> projectionSnapshots = new ArrayList<>(event.modifiedOrders.size());
+                for (Order order : event.modifiedOrders) {
+                    orderMap.put(order.getId(), order);
+                    projectionSnapshots.add(OrderProjectionSnapshot.from(order));
+                }
+
+                // 1) Read Model: orders 테이블 UPSERT
+                if (!projectionSnapshots.isEmpty()) {
+                    orderProjectionWorker.enqueue(projectionSnapshots);
+                }
+
+                // 2) 체결 후처리: 잔고 정산 / 시세·차트 / 스탑트리거
                 for (Trade trade : event.trades) {
                     eventPublisher.publishEvent(new TradeCompletedEvent(trade));
                 }
-                for (OrderEvent orderEvent : event.orderEvents) {
-                    eventPublisher.publishEvent(orderEvent);
+
+                // 3) 개인화 알림: PLACED / FILLED / PARTIAL / CANCELED / REJECTED → WS
+                for (OrderEvent oe : event.orderEvents) {
+                    Order order = orderMap.get(oe.getOrderId());
+                    if (order != null) {
+                        eventPublisher.publishEvent(new OrderNotificationEvent(
+                                order.getUserId(),
+                                order.getId(),
+                                order.getMarketId(),
+                                oe.getEventType(),
+                                oe.getStatusBefore(),
+                                oe.getStatusAfter(),
+                                oe.getFillQty(),
+                                oe.getFillPrice(),
+                                order.getExecutedQty(),
+                                order.getOrigQty()
+                        ));
+                    }
                 }
             } catch (Exception e) {
                 log.error("[Engine-Publisher] Failed to publish events at sequence: {}", sequence, e);

@@ -5,14 +5,18 @@ import com.project.snaptrade.account.domain.AccountLedger;
 import com.project.snaptrade.account.domain.LedgerEntryType;
 import com.project.snaptrade.account.repository.AccountLedgerRepository;
 import com.project.snaptrade.account.repository.AccountRepository;
+import com.project.snaptrade.common.event.NotificationType;
+import com.project.snaptrade.common.event.PrivateNotificationEvent;
 import com.project.snaptrade.wallet.domain.Withdrawal;
 import com.project.snaptrade.wallet.domain.constant.WithdrawalStatus;
 import com.project.snaptrade.wallet.repository.WithdrawalRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -21,6 +25,7 @@ public class WithdrawalService {
     private final AccountRepository accountRepository;
     private final AccountLedgerRepository ledgerRepository;
     private final WithdrawalRepository withdrawalRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public Long requestWithdrawal(Long userId, String assetSymbol, BigDecimal amount, String address) {
@@ -67,6 +72,17 @@ public class WithdrawalService {
 
         // 원장 기록 (최종 출금)
         saveLedger(account, LedgerEntryType.WITHDRAWAL_FILL, -amountAsLong, withdrawal.getId());
+
+        eventPublisher.publishEvent(new PrivateNotificationEvent(
+                withdrawal.getUserId(),
+                NotificationType.WITHDRAWAL_COMPLETED,
+                String.format("출금이 완료되었습니다. %s %s", withdrawal.getAmount().toPlainString(), withdrawal.getAssetSymbol()),
+                Map.of(
+                        "assetSymbol", withdrawal.getAssetSymbol(),
+                        "amount", withdrawal.getAmount().toPlainString(),
+                        "txHash", txHash != null ? txHash : ""
+                )
+        ));
     }
 
     private void saveLedger(Account account, LedgerEntryType type, long amount, Long referenceId) {

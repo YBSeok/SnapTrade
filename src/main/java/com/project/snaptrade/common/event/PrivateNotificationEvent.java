@@ -2,7 +2,7 @@ package com.project.snaptrade.common.event;
 
 public record PrivateNotificationEvent(
         Long userId,
-        String notificationType,
+        NotificationType notificationType,
         String message,
         Object payload
 ) {}

@@ -19,7 +19,7 @@ public class OrderPreProcessor {
 
     private final MarketMetadataCache marketCache;
 
-    public void validateAndEnqueue(OrderTrace trace) {
+    public Long validateAndEnqueue(OrderTrace trace) {
         OrderRequestDto request = trace.getRequestDto();
 
         // 멱등성 검증
@@ -67,6 +67,6 @@ public class OrderPreProcessor {
             throw new IllegalStateException("가용 잔고가 부족합니다.");
         }
 
-        matchingEngine.placeOrder(trace);
+        return matchingEngine.placeOrder(trace);
     }
 }

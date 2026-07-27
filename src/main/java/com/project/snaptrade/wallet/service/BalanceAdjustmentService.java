@@ -5,10 +5,15 @@ import com.project.snaptrade.account.domain.AccountLedger;
 import com.project.snaptrade.account.domain.LedgerEntryType;
 import com.project.snaptrade.account.repository.AccountLedgerRepository;
 import com.project.snaptrade.account.repository.AccountRepository;
+import com.project.snaptrade.common.event.NotificationType;
+import com.project.snaptrade.common.event.PrivateNotificationEvent;
 import com.project.snaptrade.wallet.domain.Deposit;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -16,6 +21,7 @@ public class BalanceAdjustmentService {
 
     private final AccountRepository accountRepository;
     private final AccountLedgerRepository ledgerRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public void processDeposit(Deposit deposit) {
@@ -48,5 +54,15 @@ public class BalanceAdjustmentService {
                 .build();
 
         ledgerRepository.save(ledger);
+
+        eventPublisher.publishEvent(new PrivateNotificationEvent(
+                deposit.getUserId(),
+                NotificationType.DEPOSIT_COMPLETED,
+                String.format("입금이 완료되었습니다. %s %s", deposit.getAmount().toPlainString(), deposit.getAssetSymbol()),
+                Map.of(
+                        "assetSymbol", deposit.getAssetSymbol(),
+                        "amount", deposit.getAmount().toPlainString()
+                )
+        ));
     }
 }
