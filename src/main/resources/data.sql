@@ -68,3 +68,31 @@ INSERT INTO markets (
 (48, 'SAND', 'USDT', 'ACTIVE', 10000, 10000000000000000, 10000, 100000000, 10000000000000, 100000000, 500000000, 500, 1000, NOW()),
 (49, 'MANA', 'USDT', 'ACTIVE', 10000, 10000000000000000, 10000, 100000000, 10000000000000, 100000000, 500000000, 500, 1000, NOW()),
 (50, 'SHIB', 'USDT', 'ACTIVE', 1, 10000000000000000, 1, 100000000000, 10000000000000000, 100000000000, 500000000, 500, 1000, NOW());
+
+-- 테스트용 가상 유저
+INSERT INTO users (id, email, name, password, status, created_at) VALUES
+                                                                      (10, 'maker10@snaptrade.com', 'LoadTest_Maker', 'dummy_password_123!', 'ACTIVE', NOW()),
+                                                                      (20, 'taker20@snaptrade.com', 'LoadTest_Taker', 'dummy_password_123!', 'ACTIVE', NOW());
+
+-- 계좌(지갑) 생성 및 초기 잔고 부여
+INSERT INTO accounts (
+    user_id, asset_symbol, total_balance, available_balance, locked_balance, version, created_at, updated_at
+) VALUES
+-- User 10 (Maker/Buyer) 지갑
+(10, 'KRW',  999000000000000, 999000000000000, 0, 0, NOW(), NOW()),
+(10, 'USDT', 999000000000000, 999000000000000, 0, 0, NOW(), NOW()),
+(10, 'BTC',  999000000000000, 999000000000000, 0, 0, NOW(), NOW()),
+(10, 'ETH',  999000000000000, 999000000000000, 0, 0, NOW(), NOW()),
+
+-- User 20 (Taker/Seller) 지갑
+(20, 'KRW',  999000000000000, 999000000000000, 0, 0, NOW(), NOW()),
+(20, 'USDT', 999000000000000, 999000000000000, 0, 0, NOW(), NOW()),
+(20, 'BTC',  999000000000000, 999000000000000, 0, 0, NOW(), NOW()),
+(20, 'ETH',  999000000000000, 999000000000000, 0, 0, NOW(), NOW());
+
+
+
+
+
+
+

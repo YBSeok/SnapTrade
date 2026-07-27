@@ -6,6 +6,8 @@ import com.project.snaptrade.engine.domain.Trade;
 import com.project.snaptrade.market.domain.Kline;
 import com.project.snaptrade.market.domain.Ticker;
 import com.project.snaptrade.market.domain.constant.ChartInterval;
+import com.project.snaptrade.market.dto.KlineBroadcastDTO;
+import com.project.snaptrade.market.dto.TickerBroadcastDTO;
 import com.project.snaptrade.market.dto.TradeCompletedEvent;
 import com.project.snaptrade.market.repository.KlineJdbcRepository;
 import com.project.snaptrade.market.repository.KlineRepository;
@@ -60,7 +62,7 @@ public class MarketDataService {
         Ticker ticker = tickerBuffer.computeIfAbsent(marketId, this::loadTickerFromDbOrInit);
         ticker.update(price, quantity, quoteQuantity, openPrice24h);
 
-        webSocketBroadcastService.broadcastTicker(ticker);
+        webSocketBroadcastService.broadcastTicker(TickerBroadcastDTO.from(ticker));
 
         // Kline 갱신 (1초, 1분봉)
         for (ChartInterval interval : HOT_INTERVALS) {
@@ -81,7 +83,7 @@ public class MarketDataService {
                 return existing;
             });
 
-            webSocketBroadcastService.broadcastKline(kline);
+            webSocketBroadcastService.broadcastKline(KlineBroadcastDTO.from(kline));
         }
     }
 
@@ -131,10 +133,10 @@ public class MarketDataService {
                 .marketId(marketId)
                 .interval(intervalCode)
                 .openTimeMs(openTimeMs)
-                .open(price)
-                .high(price)
-                .low(price)
-                .close(price)
+                .openPrice(price)
+                .highPrice(price)
+                .lowPrice(price)
+                .closePrice(price)
                 .volume(volume)
                 .quoteVolume(quoteVolume)
                 .build();

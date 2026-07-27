@@ -8,9 +8,9 @@ import org.springframework.data.repository.query.Param;
 import java.util.Optional;
 
 public interface KlineRepository extends JpaRepository<Kline, Long> {
-    @Query(value = "SELECT close_price FROM kline " +
+    @Query(value = "SELECT close_price FROM klines " +
             "WHERE market_id = :marketId " +
-            "AND interval_type = '1m' " +
+            "AND `interval` = '1m' " +
             "AND open_time_ms <= :targetTimeMs " +
             "ORDER BY open_time_ms DESC LIMIT 1",
             nativeQuery = true)

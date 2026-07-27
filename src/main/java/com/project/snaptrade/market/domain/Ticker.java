@@ -10,11 +10,17 @@ import org.hibernate.annotations.UpdateTimestamp;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "tickers")
+@Table(
+        name = "tickers",
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uk_tickers_market_id", columnNames = {"market_id"})
+        }
+)
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Ticker {
     @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @Column(name = "market_id", nullable = false)

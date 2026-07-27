@@ -1,14 +1,19 @@
 server:
-  servlet:
-    context-path: /api
 
 jwt:
   secret: "SnapTradeSuperSecretKeyForJwtAuthenticationWhichIsVeryLong2026!"
   access-expiration: 3600000
 
+simulation:
+  trade-interval-ms: 100
+
 spring:
   application:
     name: snaptrade
+
+  threads:
+    virtual:
+      enabled: true
 
   sql:
     init:

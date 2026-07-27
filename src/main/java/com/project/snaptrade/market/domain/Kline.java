@@ -10,12 +10,18 @@ import org.hibernate.annotations.CreationTimestamp;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "klines")
+@Table(
+        name = "klines",
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uk_klines_identity", columnNames = {"market_id", "interval", "open_time_ms"})
+        }
+)
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Kline {
     @Id
-    private long id;
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
 
     @Column(name = "market_id", nullable = false)
     private long marketId;
@@ -26,10 +32,10 @@ public class Kline {
     @Column(name = "open_time_ms", nullable = false)
     private long openTimeMs;
 
-    @Column(nullable = false) private long open;
-    @Column(nullable = false) private long low;
-    @Column(nullable = false) private long high;
-    @Column(nullable = false) private long close;
+    @Column(nullable = false) private long openPrice;
+    @Column(nullable = false) private long lowPrice;
+    @Column(nullable = false) private long highPrice;
+    @Column(nullable = false) private long closePrice;
 
     @Column(nullable = false) private long volume = 0L;
 
@@ -41,23 +47,23 @@ public class Kline {
     private LocalDateTime createdAt;
 
     @Builder
-    public Kline(long id, long marketId, String interval, long openTimeMs, long open, long low, long high, long close, long volume, long quoteVolume) {
+    public Kline(long id, long marketId, String interval, long openTimeMs, long openPrice, long lowPrice, long highPrice, long closePrice, long volume, long quoteVolume) {
         this.id = id;
         this.marketId = marketId;
         this.interval = interval;
         this.openTimeMs = openTimeMs;
-        this.open = open;
-        this.low = low;
-        this.high = high;
-        this.close = close;
+        this.openPrice = openPrice;
+        this.lowPrice = lowPrice;
+        this.highPrice = highPrice;
+        this.closePrice = closePrice;
         this.volume = volume;
         this.quoteVolume = quoteVolume;
     }
 
     public void update(long tradePrice, long tradeQty, long tradeQuoteQty) {
-        if (tradePrice > this.high) this.high = tradePrice;
-        if (tradePrice < this.low)  this.low = tradePrice;
-        this.close = tradePrice;
+        if (tradePrice > this.highPrice) this.highPrice = tradePrice;
+        if (tradePrice < this.lowPrice)  this.lowPrice = tradePrice;
+        this.closePrice = tradePrice;
 
         this.volume += tradeQty;
         this.quoteVolume += tradeQuoteQty;

@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/v1/markets")
+@RequestMapping("/api/v1/markets")
 @RequiredArgsConstructor
 public class MarketController {
     private final MarketService marketService;

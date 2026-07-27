@@ -14,7 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/v1/wallet")
+@RequestMapping("/api/v1/wallet")
 @RequiredArgsConstructor
 public class WalletController {
 
