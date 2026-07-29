@@ -2,13 +2,12 @@ package com.project.snaptrade.notification;
 
 import com.project.snaptrade.common.event.NotificationType;
 import com.project.snaptrade.common.event.OrderNotificationEvent;
+import com.project.snaptrade.common.kafka.KafkaTopics;
 import com.project.snaptrade.common.websocket.UserNotificationService;
-import com.project.snaptrade.engine.domain.constant.EventType;
 import com.project.snaptrade.engine.domain.constant.OrderStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.Async;
+import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
@@ -21,8 +20,7 @@ public class OrderNotificationListener {
 
     private final UserNotificationService userNotificationService;
 
-    @Async("webSocketTaskExecutor")
-    @EventListener
+    @KafkaListener(topics = KafkaTopics.ORDER_LIFECYCLE, groupId = "notification-service")
     public void onOrderNotification(OrderNotificationEvent event) {
         NotificationType type = resolveType(event);
         if (type == null) return;

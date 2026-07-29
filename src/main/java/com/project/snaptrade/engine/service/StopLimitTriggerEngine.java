@@ -1,10 +1,10 @@
 package com.project.snaptrade.engine.service;
 
+import com.project.snaptrade.common.kafka.KafkaTopics;
+import com.project.snaptrade.common.kafka.TradeCompletedMessage;
 import com.project.snaptrade.engine.domain.OrderTrace;
-import com.project.snaptrade.market.dto.TradeCompletedEvent;
 import lombok.RequiredArgsConstructor;
-import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.Async;
+import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -22,11 +22,10 @@ public class StopLimitTriggerEngine {
                 .add(trace);
     }
 
-    @Async("triggerEngineTaskExecutor")
-    @EventListener
-    public void onTradeCompleted(TradeCompletedEvent event) {
-        long currentPrice = event.trade().getPrice();
-        Long marketId = event.trade().getMarketId();
+    @KafkaListener(topics = KafkaTopics.TRADE_COMPLETED, groupId = "stop-trigger-service")
+    public void onTradeCompleted(TradeCompletedMessage message) {
+        long currentPrice = message.price();
+        Long marketId = message.marketId();
 
         List<OrderTrace> stopOrders = stopOrderBook.get(marketId);
         if (stopOrders == null || stopOrders.isEmpty()) return;

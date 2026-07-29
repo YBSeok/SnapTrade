@@ -1,10 +1,9 @@
 package com.project.snaptrade.simulation;
 
+import com.project.snaptrade.common.kafka.EngineKafkaPublisher;
 import com.project.snaptrade.engine.domain.Trade;
-import com.project.snaptrade.market.dto.TradeCompletedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -15,7 +14,7 @@ import java.util.concurrent.ThreadLocalRandom;
 @RequiredArgsConstructor
 public class MockTradeGenerator {
 
-    private final ApplicationEventPublisher eventPublisher;
+    private final EngineKafkaPublisher engineKafkaPublisher;
 
     @Scheduled(fixedRateString = "${simulation.trade-interval-ms:100}")
     public void generateMockTrade() {
@@ -27,12 +26,12 @@ public class MockTradeGenerator {
         Trade mockTrade = Trade.builder()
                 .id(ThreadLocalRandom.current().nextLong(1, Integer.MAX_VALUE))
                 .marketId(marketId)
-                .makerOrderId(1001L) // Dummy Maker Order ID
-                .takerOrderId(1002L) // Dummy Taker Order ID
-                .makerUserId(10L)    // Dummy Maker User ID
-                .takerUserId(20L)    // Dummy Taker User ID
-                .buyerId(10L)        // Dummy Buyer ID
-                .sellerId(20L)       // Dummy Seller ID
+                .makerOrderId(1001L)
+                .takerOrderId(1002L)
+                .makerUserId(10L)
+                .takerUserId(20L)
+                .buyerId(10L)
+                .sellerId(20L)
                 .price(price)
                 .quantity(quantity)
                 .quoteQuantity(quoteQuantity)
@@ -45,6 +44,6 @@ public class MockTradeGenerator {
             log.debug("Simulated Trade Created - Market: {}, Price: {}", marketId, price);
         }
 
-        eventPublisher.publishEvent(new TradeCompletedEvent(mockTrade));
+        engineKafkaPublisher.publishTradeCompleted(mockTrade);
     }
 }

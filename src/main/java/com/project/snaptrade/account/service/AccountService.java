@@ -5,15 +5,15 @@ import com.project.snaptrade.account.domain.AccountLedger;
 import com.project.snaptrade.account.domain.LedgerEntryType;
 import com.project.snaptrade.account.repository.AccountLedgerRepository;
 import com.project.snaptrade.account.repository.AccountRepository;
+import com.project.snaptrade.common.kafka.KafkaTopics;
+import com.project.snaptrade.common.kafka.TradeCompletedMessage;
 import com.project.snaptrade.engine.domain.Trade;
 import com.project.snaptrade.engine.service.MarketMetadataCache;
 import com.project.snaptrade.market.domain.MarketSpec;
-import com.project.snaptrade.market.dto.TradeCompletedEvent;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.Async;
+import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 
 @Slf4j
@@ -25,11 +25,10 @@ public class AccountService {
     private final AccountLedgerRepository ledgerRepository;
     private final MarketMetadataCache marketCache;
 
-    @Async("accountingTaskExecutor")
-    @EventListener
+    @KafkaListener(topics = KafkaTopics.TRADE_COMPLETED, groupId = "account-service")
     @Transactional
-    public void onTradeCompleted(TradeCompletedEvent event) {
-        Trade trade = event.trade();
+    public void onTradeCompleted(TradeCompletedMessage message) {
+        Trade trade = message.toTrade();
         MarketSpec spec = marketCache.getSpec(trade.getMarketId());
 
         long buyerFee = determineFee(trade, trade.getBuyerId());

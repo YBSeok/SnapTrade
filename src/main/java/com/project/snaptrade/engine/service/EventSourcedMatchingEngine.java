@@ -9,16 +9,15 @@ import com.lmax.disruptor.dsl.Disruptor;
 import com.lmax.disruptor.dsl.ProducerType;
 import com.lmax.disruptor.util.DaemonThreadFactory;
 import com.project.snaptrade.common.event.OrderNotificationEvent;
+import com.project.snaptrade.common.kafka.EngineKafkaPublisher;
 import com.project.snaptrade.engine.Dto.OrderRequestDto;
 import com.project.snaptrade.engine.domain.*;
 import com.project.snaptrade.engine.domain.constant.*;
 import com.project.snaptrade.engine.repository.EventExecutionRepository;
-import com.project.snaptrade.engine.repository.ExecutionRepository;
 import com.project.snaptrade.engine.repository.OrderRepository;
 import com.project.snaptrade.engine.repository.TradeRepository;
 import com.project.snaptrade.market.domain.Market;
 import com.project.snaptrade.market.domain.MarketSpec;
-import com.project.snaptrade.market.dto.TradeCompletedEvent;
 import com.project.snaptrade.market.repository.MarketRepository;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -27,16 +26,13 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicLong;
 
 @Service
@@ -65,10 +61,9 @@ public class EventSourcedMatchingEngine {
         }
     }
 
-    private final ApplicationEventPublisher eventPublisher;
+    private final EngineKafkaPublisher engineKafkaPublisher;
     private final ObjectMapper objectMapper;
     private final MarketMetadataCache marketCache;
-    private final OrderProjectionWorker orderProjectionWorker;
 
     private Disruptor<EngineEvent> disruptor;
     private RingBuffer<EngineEvent> ringBuffer;
@@ -478,27 +473,25 @@ public class EventSourcedMatchingEngine {
             try {
                 // 알림용 orderId→Order 조회맵 + Projection용 불변 스냅샷 준비
                 Map<Long, Order> orderMap = new HashMap<>();
-                List<OrderProjectionSnapshot> projectionSnapshots = new ArrayList<>(event.modifiedOrders.size());
                 for (Order order : event.modifiedOrders) {
                     orderMap.put(order.getId(), order);
-                    projectionSnapshots.add(OrderProjectionSnapshot.from(order));
                 }
 
-                // 1) Read Model: orders 테이블 UPSERT
-                if (!projectionSnapshots.isEmpty()) {
-                    orderProjectionWorker.enqueue(projectionSnapshots);
+                // 1) Read Model: orders UPSERT는 Kafka order.projection 소비자에서 처리
+                for (Order order : event.modifiedOrders) {
+                    engineKafkaPublisher.publishProjection(OrderProjectionSnapshot.from(order));
                 }
 
                 // 2) 체결 후처리: 잔고 정산 / 시세·차트 / 스탑트리거
                 for (Trade trade : event.trades) {
-                    eventPublisher.publishEvent(new TradeCompletedEvent(trade));
+                    engineKafkaPublisher.publishTradeCompleted(trade);
                 }
 
                 // 3) 개인화 알림: PLACED / FILLED / PARTIAL / CANCELED / REJECTED → WS
                 for (OrderEvent oe : event.orderEvents) {
                     Order order = orderMap.get(oe.getOrderId());
                     if (order != null) {
-                        eventPublisher.publishEvent(new OrderNotificationEvent(
+                        engineKafkaPublisher.publishOrderLifecycle(new OrderNotificationEvent(
                                 order.getUserId(),
                                 order.getId(),
                                 order.getMarketId(),

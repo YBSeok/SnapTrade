@@ -29,6 +29,7 @@ dependencies {
 	runtimeOnly 'com.mysql:mysql-connector-j'
 
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
+	implementation 'org.springframework.boot:spring-boot-starter-kafka'
 
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'

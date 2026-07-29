@@ -15,6 +15,21 @@ Snap Trade는 처리량과 지연 시간 최적화에 주력하는 암호화폐 
 * **시장 데이터 및 스트리밍 (Market Data & Streaming)**
   주문 및 체결 과정을 통해 지속적으로 변화하는 실시간 호가(Orderbook), 체결 내역(Trade), 시세(Ticker) 및 차트용 시계열 데이터(Kline)를 가공하여 모든 사용자에게 지연 없이 전파하는 기능입니다.
 
+## Design Documents
+
+아키텍처와 내부 동작은 [`design/`](design/README.md) 문서를 참고하세요.
+
+| Document | Description |
+| :--- | :--- |
+| Design Documents | Description |
+| :--- | :--- |
+| [Matching Engine](design/matching_engine.md) | Order intake, Disruptor pipeline (Matching → Journal → Publisher), Kafka fan-out, status polling |
+| [Ledger](design/ledger.md) | Account balances and append-only ledger for trades, deposits, and withdrawals |
+| [Data Streaming](design/data_streaming.md) | Public ticker / kline STOMP streams driven by `trade.completed` |
+| [Notification](design/notification.md) | Private per-user alerts on `/user/queue/notifications` |
+
+Kafka broker는 `docker compose up -d kafka` 로 띄운 뒤 앱을 실행하세요 (`localhost:9092`).
+
 ## 성능 목표
 
 | 지표 | 목표값 |

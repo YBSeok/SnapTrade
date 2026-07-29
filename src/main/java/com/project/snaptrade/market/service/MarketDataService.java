@@ -1,6 +1,8 @@
 package com.project.snaptrade.market.service;
 
 import com.github.f4b6a3.tsid.TsidCreator;
+import com.project.snaptrade.common.kafka.KafkaTopics;
+import com.project.snaptrade.common.kafka.TradeCompletedMessage;
 import com.project.snaptrade.common.websocket.MarketBroadcastService;
 import com.project.snaptrade.engine.domain.Trade;
 import com.project.snaptrade.market.domain.Kline;
@@ -8,15 +10,13 @@ import com.project.snaptrade.market.domain.Ticker;
 import com.project.snaptrade.market.domain.constant.ChartInterval;
 import com.project.snaptrade.market.dto.KlineBroadcastDTO;
 import com.project.snaptrade.market.dto.TickerBroadcastDTO;
-import com.project.snaptrade.market.dto.TradeCompletedEvent;
 import com.project.snaptrade.market.repository.KlineJdbcRepository;
 import com.project.snaptrade.market.repository.KlineRepository;
 import com.project.snaptrade.market.repository.TickerJdbcRepository;
 import com.project.snaptrade.market.repository.TickerRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.Async;
+import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -46,10 +46,9 @@ public class MarketDataService {
 
     private final ConcurrentLinkedQueue<Kline> pendingKlinesToDb = new ConcurrentLinkedQueue<>();
 
-    @Async("marketDataTaskExecutor")
-    @EventListener
-    public void onTradeCompleted(TradeCompletedEvent event) {
-        Trade trade = event.trade();
+    @KafkaListener(topics = KafkaTopics.TRADE_COMPLETED, groupId = "market-data-service")
+    public void onTradeCompleted(TradeCompletedMessage message) {
+        Trade trade = message.toTrade();
         long marketId = trade.getMarketId();
         long price = trade.getPrice();
         long quantity = trade.getQuantity();
