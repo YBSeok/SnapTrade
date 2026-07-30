@@ -13,24 +13,24 @@ public class KafkaConfig {
     @Bean
     public NewTopic tradeCompletedTopic() {
         return TopicBuilder.name(KafkaTopics.TRADE_COMPLETED)
-                .partitions(6)
-                .replicas(1)
+                .partitions(3)
+                .replicas(2)
                 .build();
     }
 
     @Bean
     public NewTopic orderLifecycleTopic() {
         return TopicBuilder.name(KafkaTopics.ORDER_LIFECYCLE)
-                .partitions(6)
-                .replicas(1)
+                .partitions(3)
+                .replicas(2)
                 .build();
     }
 
     @Bean
     public NewTopic orderProjectionTopic() {
         return TopicBuilder.name(KafkaTopics.ORDER_PROJECTION)
-                .partitions(6)
-                .replicas(1)
+                .partitions(3)
+                .replicas(2)
                 .build();
     }
 }

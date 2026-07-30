@@ -10,7 +10,6 @@ import org.springframework.stereotype.Component;
 
 /**
  * Publishes post-journal engine events to Kafka.
- * Sends are async — do not block the Disruptor Publisher thread on .get().
  */
 @Slf4j
 @Component

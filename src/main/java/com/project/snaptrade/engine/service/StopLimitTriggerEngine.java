@@ -30,20 +30,18 @@ public class StopLimitTriggerEngine {
         List<OrderTrace> stopOrders = stopOrderBook.get(marketId);
         if (stopOrders == null || stopOrders.isEmpty()) return;
 
-        for (OrderTrace stopOrderTrace : stopOrders) {
+        stopOrders.removeIf(stopOrderTrace -> {
             long triggerPrice = stopOrderTrace.getRequestDto().getTriggerPrice();
-            boolean isStopLossHit = false;
+            boolean isStopDown = stopOrderTrace.getRequestDto().isStopDown();
 
-            if (stopOrderTrace.getRequestDto().isStopDown() && currentPrice <= triggerPrice) {
-                isStopLossHit = true;
-            } else if (!stopOrderTrace.getRequestDto().isStopDown() && currentPrice >= triggerPrice) {
-                isStopLossHit = true;
-            }
+            boolean isStopLossHit = (isStopDown && currentPrice <= triggerPrice) ||
+                    (!isStopDown && currentPrice >= triggerPrice);
 
             if (isStopLossHit) {
-                stopOrders.remove(stopOrderTrace);
                 orderPreProcessor.validateAndEnqueue(stopOrderTrace);
+                return true;
             }
-        }
+            return false;
+        });
     }
 }
