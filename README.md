@@ -62,82 +62,80 @@ flowchart LR
 
 ---
 
-### 2. [시스템 아키텍처] Kafka 기반 매칭-영속화 계층 분리로 장애 격리 및 확장 구조 확보
+### 2. [시스템 아키텍처] Message Queue를 통한 매칭-영속화 계층 분리로 장애 격리 및 확장 구조 확보
 
 #### 전체적인 아키텍처
 
 ```mermaid
 flowchart LR
-    Eng[매칭 엔진] -->|이벤트 발행| Kafka[(Kafka Log)]
+    subgraph Engine["매칭 프로세스"]
+        M[Match] --> J[Journal]
+        J --> P[Publisher]
+    end
 
-    Kafka --> Settle[정산 Consumer]
-    Kafka --> Stats[통계 Consumer]
-    Kafka --> Noti[알림 Consumer]
-    Kafka --> Persist[영속화 Consumer]
+    P -->|append| Kafka[(Kafka Commit Log)]
 
-    Settle --> DB[(RDB)]
-    Persist --> DB
+    Kafka --> G1[account-service]
+    Kafka --> G2[market-data-service]
+    Kafka --> G3[notification-service]
+    Kafka --> G4[order-projection]
+    Kafka --> G5[stop-trigger-service]
 
-    Eng -.->|생명주기 분리| DB
+    G1 --> RDB[(RDB)]
+    G4 --> RDB
 ```
 
 #### 문제 원인
 
-* LMAX Disruptor 도입 이후에도 RingBuffer가 가득 차는 백프레셔가 관측되었음.
-* 근본 원인은 매칭 엔진과 DB가 같은 생명주기를 공유해 RDB 지연이 매칭 경로까지 전파되는 구조에 있었음.
-* 정산·통계·알림 등 소비자가 계속 늘어나고 유실이 허용되지 않는 도메인이라, 프로세스 간 디커플링과 내구성을 동시에 만족하는 버스가 필요했음.
+* LMAX Disruptor를 붙여도 RingBuffer가 가득 차면 톰캣 요청이 대기하는 백프레셔가 남았고, 매칭·DB Insert를 각각 최적화해도 E2E 지연이 개선되지 않았음.
+* 근본 원인은 매칭(CPU-bound)과 저널/프로젝션(Disk I/O-bound)이 같은 프로세스·생명주기를 공유해, RDB 지연·장애가 매칭 핫패스까지 전파되는 구조에 있었음.
+* RingBuffer는 프로세스 메모리 안에서만 속도 차이를 완충하므로, 버퍼 포화·프로세스 사망 시 미기록 체결은 유실되며 리플레이로도 복구할 수 없었음.
 
 #### 해결 과정
 
-* Redis·RabbitMQ·Kafka를 비교한 뒤, 다중 소비자·내구성·순서 요구를 충족하는 Kafka를 이벤트 버스로 채택함.
-* 이벤트 발행을 Kafka Producer로 교체하고, Confluent 파티션 산정 공식 기준으로 파티션·레플리카를 설계함.
-* 주문/마켓 고유 식별자를 파티셔닝 키로 사용해 파티션 내 순서를 보장함.
-* 정산·통계·알림·영속화 서비스를 독립 Consumer Group으로 분리해 병렬 소비·독립 스케일링이 가능한 구조를 만듦.
+* 인프라(장애 격리)·비용(CPU/디스크 독립 스케일)·안정성(비결정적 I/O 제거)·내구성(독립 생명주기 버퍼) 4관점에서 매칭과 후처리 영속화를 분리하고, 스레드/인메모리 큐가 아닌 **메시지 큐 패턴(Pub-Sub)** 을 채택함.
+* Redis Streams·RabbitMQ·Kafka를 1차 저장소·Replay·순서 보장 기준으로 비교한 뒤, 디스크 커밋 로그·재생 가능·파티션 키 기반 순서+병렬을 만족하는 **Kafka**를 Journal 이후 Publisher 팬아웃 버스로 선택함.
+* `trade.completed` / `order.lifecycle` / `order.projection` 토픽을 두고, [Confluent 파티션 공식](https://docs.confluent.io/kafka/operations-tools/partition-determination.html#partition-formula) `N = max(T/p, T/c)` 기준으로 파티션 **3**·레플리카 **2**를 산정함.
+* 파티션 키는 MarketID·UserID·OrderID로 고정해 마켓/사용자/주문 단위 순서를 보장하고, 정산·시세·알림·프로젝션·스탑트리거를 **독립 Consumer Group**으로 분리해 동일 이벤트를 각자의 속도로 병렬 소비함.
 
 #### 결과
 
-* RDB 일시 장애 주입 부하 테스트에서 매칭 엔진 가용성 **99.9% 유지**, 주문 접수 성공률 하락 **없음**(기존 동일 장애 시 성공률 **~62%**).
-* 후처리 이벤트는 Kafka 로그에 append되어 재시작·소비 지연과 무관하게 **재처리 가능**, 유실 이벤트 **0건**.
-* 소비자별 독립 스케일 아웃 검증: 영속화 Consumer만 2→4 확장 시 적체 해소 시간 **약 4.1분 → 1.3분**.
+* RDB 일시 장애가 매칭 코어를 멈추지 않도록 격리되어, `trade.completed`를 서로 다른 Consumer Group 3개가 독립 구독하는 고가용 구조를 확보함.
+* 핫패스에서 Projection·Account·Notification 등 비결정적 I/O가 제거되어 RingBuffer를 막던 RDB 역압이 완화되고, 코어 매칭은 주문 입력만으로 상태가 바뀌는 결정성에 가까워짐.
+* 후처리 이벤트는 Kafka 로그에 append되어 재시작·지연과 무관하게 오프셋 단위로 재소비 가능하며, 연산 서버와 기록 서버를 분리 스케일링할 인터페이스를 마련함.
 
 ---
 
-### 3. [상태 복구] 이벤트 리플레이로 인메모리 OrderBook을 결정론적으로 복구
+### 3. [마켓 데이터] 실시간 스트리밍 아키텍처 설계와 브로드캐스트 지연 병목 분석
 
 #### 전체적인 아키텍처
 
 ```mermaid
-flowchart TB
-    subgraph Runtime["런타임"]
-        Match[매칭] --> Events[이벤트 스트림]
-        Events --> Book[(OrderBook)]
-    end
+flowchart LR
+    Trade[체결 이벤트] --> Buf[인메모리<br/>Ticker / Kline]
+    Buf --> WS[WebSocket STOMP]
+    Buf --> Sched[스케줄러]
+    Sched --> DB[(RDB 스냅샷)]
 
-    subgraph Recovery["장애 복구"]
-        Log[(영속 이벤트 로그)] --> Replay[시간순 리플레이]
-        Replay --> Book2[(OrderBook 재구성)]
-    end
-
-    Events --> Log
-    Book -.->|프로세스 종료| X[상태 소실]
-    Book2 -.->|동일 입력 → 동일 상태| Book
+    WS --> Pub["/topic 공개 시세"]
+    WS --> Priv["/user 개인 알림"]
 ```
 
 #### 문제 원인
 
-* 매칭 성능을 위해 OrderBook을 인메모리로 두면서, 프로세스 재시작 시 호가 상태가 통째로 사라지는 리스크가 생겼음.
-* 단순 DB 스냅샷 복구는 체결 도중 크래시 시 “주문은 있는데 체결 반영이 빠진” 중간 상태를 만들 수 있었음.
-* 거래소 도메인에서는 복구 후에도 가격 우선·시간 우선이 깨지면 안 되므로, 입력 이벤트로만 상태를 재현하는 결정론적 복구가 필요했음.
+* 거래소 시세는 서버 UTC 기준의 Ticker(스냅샷)·Kline(시계열)·24h 롤링 윈도우를 실시간으로 전달해야 하며, 목표 메시지 지연은 **50ms 미만**이었음.
+* k6 **1,000 VU**로 마켓 **50개** Ticker + BTC **1m** Kline을 구독하자 p(95) **66ms**, max **607ms**(Ticker max **1,001ms**)까지 지연이 튀어 목표를 초과했음.
+* VU당 51개 구독으로 서버에 **약 51,000** 세션이 생기고, 체결마다 SimpleBroker가 구독 세션별 전송 작업을 Outbound 큐에 밀어 넣어 큐잉 딜레이·CPU 포화가 발생했음.
 
 #### 해결 과정
 
-* 주문/체결/취소를 `ORDER_PLACED` · `TRADE_MATCHED` · `ORDER_CANCELED` 이벤트로 남겨, OrderBook을 이벤트 적용 결과로만 정의함.
-* 기동 시 영속 이벤트를 ID 오름차순으로 읽어 메모리에 리플레이하고, 잔여 활성 주문만 OrderBook에 재적재함.
-* Command(매칭)와 Query(주문 조회 프로젝션)를 분리해, 복구는 이벤트 로그를 단일 진실 공급원으로 사용함.
-* 복구 소요 시간과 리플레이 건수를 로그·메트릭으로 남겨, 재기동 SLA를 관측 가능하게 함.
+* Polling·SSE·WebSocket을 비교해 양방향·낮은 오버헤드·동적 구독·바이너리 확장성을 이유로 **WebSocket + STOMP**를 채택하고, Public(`/topic`)·Private(`/user`) 채널과 JWT CONNECT/SUBSCRIBE 가드를 분리함. ([설계 기록](https://soberyl.tistory.com/76))
+* 체결 이벤트를 매칭 파이프라인 바깥의 `marketDataTaskExecutor`에서 수신해 인메모리 Ticker/Kline을 갱신한 뒤 즉시 방송하고, RDB 반영은 백그라운드 스케줄러로 분리함.
+* Outbound 채널에 `QueueDelayTaskDecorator`로 `websocket_outbound_queue_delay`를 계측하고, 플랫폼 스레드 풀(16~64)에서 가상 스레드(core/max **8,192**)로 전환해 I/O 팬아웃 비용을 줄이려 함.
+* 병목 가설을 “세션마다 반복되는 STOMP 헤더 인코딩·문자열 조립의 CPU 비용”으로 좁히고, 로컬호스트(어태커·디펜더 동일 PC) 오염을 인지해 다음 최적화 축을 설정함.
 
 #### 결과
 
-* 강제 킬 후 재기동 복구 테스트에서 활성 호가 일치율 **100%**(유실·중복 체결 0건).
-* 이벤트 **약 120만 건** 리플레이 기준 OrderBook 복구 **평균 850ms**, p(95) **1.2s** 이내 완료.
-* 복구 직후 즉시 부하(피크 20,000 TPS 구간)를 재개해도 첫 1분 주문 에러율 **< 0.05%**, 호가 정합성 위반 **0건**.
+* 단일 Ticker 구독(1,000 VU)에서는 핸드셰이크 에러 **0**, 브로드캐스트 p(95) **26ms**로 목표(< 50ms)를 만족함.
+* 50 마켓 전역 구독 시 p(95) **66ms**·Ticker max **1,001ms**를 재현하고, Outbound 큐잉 딜레이 max **약 100ms**·방송 평균 지연 **약 70ms**·CPU 포화(~1.0)를 Grafana로 확인함.
+* 가상 스레드 적용 후 max는 줄었으나 p(95) 개선은 제한적이었고, 병목이 컨텍스트 스위칭보다 **STOMP 프레임 인코딩 CPU**에 있음을 수치로 입증함.
